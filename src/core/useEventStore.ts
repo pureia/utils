@@ -2,6 +2,8 @@ type Handler<T> = (result: T) => void;
 
 type StoreValue<T> = T | Set<Handler<T>>;
 
+type Extensible<T> = T & { [key: string]: any };
+
 /** 事件键类型 */
 type EventKey<T> = keyof T;
 /** 事件载荷类型 */
@@ -38,7 +40,7 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * ```
  */
 function useEventStore<E extends Record<string, any> = Record<string, any>>() {
-  type T = E & { [key: string | number]: any };
+  type T = Extensible<E>;
 
   const store = new Map<EventKey<T>, any>();
 
