@@ -1,16 +1,16 @@
-import { eventStore } from '@purea/utils';
+import { useEventStore } from '@purea/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// 声明测试用的事件类型
-declare module '@purea/utils' {
-  interface EventStore {
-    'user:login': { userId: string; name: string };
-    'cart:update': { count: number };
-    'message:send': string;
-  }
+// 定义测试用的事件类型
+interface TestEvents {
+  'user:login': { userId: string; name: string };
+  'cart:update': { count: number };
+  'message:send': string;
 }
 
-describe('eventStore', () => {
+describe('useEventStore', () => {
+  const eventStore = useEventStore<TestEvents>();
+
   afterEach(() => {
     eventStore.clear();
   });
@@ -215,6 +215,29 @@ describe('eventStore', () => {
 
       eventStore.delete('user:login');
       expect(eventStore.keys()).toEqual(['cart:update']);
+    });
+  });
+
+  describe('multiple instances', () => {
+    it('should create independent event stores', () => {
+      const store1 = useEventStore<TestEvents>();
+      const store2 = useEventStore<TestEvents>();
+
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
+
+      store1.on('user:login', handler1);
+      store2.on('user:login', handler2);
+
+      store1.emit('user:login', { userId: '1', name: 'John' });
+
+      expect(handler1).toHaveBeenCalledTimes(1);
+      expect(handler2).not.toHaveBeenCalled();
+
+      store2.emit('user:login', { userId: '2', name: 'Jane' });
+
+      expect(handler1).toHaveBeenCalledTimes(1);
+      expect(handler2).toHaveBeenCalledTimes(1);
     });
   });
 });
