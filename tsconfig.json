@@ -4,6 +4,7 @@
     "baseUrl": ".",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "types": ["@dcloudio/types"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true

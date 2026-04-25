@@ -15,7 +15,7 @@ import useEventStore from './useEventStore';
  * // result1 和 result2 会得到相同的结果
  * ```
  */
-function useAsyncDebounce(): <V>(key: string, asyncFunc: () => Promise<V>) => Promise<V> {
+function useAsyncDebounce() {
   const eventStore = useEventStore();
 
   /**
@@ -24,7 +24,7 @@ function useAsyncDebounce(): <V>(key: string, asyncFunc: () => Promise<V>) => Pr
    * @param asyncFunc - 要执行的异步函数
    * @returns 返回一个 Promise，解析为异步函数的结果
    */
-  return <V>(key: string, asyncFunc: () => Promise<V>): Promise<V> => {
+  function asyncDebounce<V>(key: string, asyncFunc: () => Promise<V>): Promise<V> {
     // 如果事件已存在，说明已有相同 key 的请求在进行中，不再重复执行
     !eventStore.has(key) && Promise.resolve().then(() => asyncFunc()).then(result => {
       eventStore.emit(key, { fulfilled: result });
@@ -37,6 +37,7 @@ function useAsyncDebounce(): <V>(key: string, asyncFunc: () => Promise<V>) => Pr
       eventStore.once(key, result => 'rejected' in result ? reject(result.rejected) : resolve(result.fulfilled!));
     });
   };
+  return { asyncDebounce, eventStore };
 }
 
 export { useAsyncDebounce };

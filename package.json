@@ -20,6 +20,14 @@
     "./core/*": {
       "types": "./dist/core/*.d.mts",
       "import": "./dist/core/*.mjs"
+    },
+    "./uniapp": {
+      "types": "./dist/uniapp/index.d.mts",
+      "import": "./dist/uniapp/index.mjs"
+    },
+    "./uniapp/*": {
+      "types": "./dist/uniapp/*.d.mts",
+      "import": "./dist/uniapp/*.mjs"
     }
   },
   "main": "./dist/index.mjs",
@@ -33,8 +41,13 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "lodash-es": "^4.18.1"
+  },
   "devDependencies": {
+    "@dcloudio/types": "^3.4.31",
     "@purea/eslint-config": "latest",
+    "@types/lodash-es": "^4.17.12",
     "eslint": "^9.39.4",
     "jiti": "^2.6.1",
     "tsdown": "^0.21.10",
