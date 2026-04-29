@@ -18,8 +18,6 @@ interface BaseRequestConfig {
   isDebounce: boolean;
   /** 响应数据路径 */
   responseDataPath: string;
-  /** 其他自定义配置 */
-  [key: string]: any;
 }
 
 interface ResponseResult<R, D> {

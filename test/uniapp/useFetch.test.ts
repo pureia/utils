@@ -8,6 +8,18 @@ vi.stubGlobal('uni', {
   request: mockUniRequest,
 });
 
+function getRequestConfig<C extends Record<string, any>>(otherConfig: C) {
+  const baseConfig: BaseRequestConfig = {
+    host: 'https://api.example.com',
+    header: { 'Content-Type': 'application/json' },
+    timeout: 10000,
+    method: 'GET',
+    isDebounce: false,
+    responseDataPath: '',
+  };
+  return { ...baseConfig, otherConfig };
+}
+
 const BASE_CONFIG: BaseRequestConfig = {
   host: 'https://api.example.com',
   header: { 'Content-Type': 'application/json' },
@@ -17,7 +29,7 @@ const BASE_CONFIG: BaseRequestConfig = {
   responseDataPath: '',
 };
 
-function createFetch(overrides?: Partial<BaseRequestConfig>) {
+function createFetch<T extends Record<string, any>>(overrides: T) {
   return useFetch(() => ({ ...BASE_CONFIG, ...overrides }));
 }
 
@@ -47,8 +59,14 @@ describe('useFetch', () => {
     it('应该发送请求并返回完整的响应结果', async () => {
       mockSuccessResponse({ id: 1, name: 'test' });
 
-      const fetch = createFetch();
+      const fetch = createFetch({ test: 123 });
       const result = await fetch.request({ url: '/users/1', method: 'GET' });
+
+      fetch.interceptors.request.use(config => {
+        console.log(config.test);
+
+        return config;
+      });
 
       expect(result.code).toBe(200);
       expect(result.data).toEqual({ id: 1, name: 'test' });
