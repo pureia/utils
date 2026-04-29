@@ -74,13 +74,14 @@ function useInterceptorManager<C>() {
   return { handlers, use };
 }
 
-function useFetch<R extends BaseRequestConfig>(getBaseRequestConfig: () => R) {
+function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
   const { asyncDebounce, eventStore } = useAsyncDebounce();
 
-  const baseRequestConfig = getBaseRequestConfig();
+  /** 原始请求配置 */
+  type OriginalRequestConfig = ReturnType<typeof getOriginalRequestConfig>;
 
-  /** 请求路径 */
-  type RequestConfig = Partial<typeof baseRequestConfig> & {
+  /** 请求配置 */
+  type RequestConfig = Partial<OriginalRequestConfig> & {
     url: string;
     /** 请求数据 */
     data?: any;
@@ -88,14 +89,15 @@ function useFetch<R extends BaseRequestConfig>(getBaseRequestConfig: () => R) {
     key?: string;
   };
 
-  type FullRequestConfig = (typeof baseRequestConfig) & RequestConfig;
+  /** 完整请求配置 */
+  type FullRequestConfig = OriginalRequestConfig & RequestConfig & { readonly rawRequestConfig: RequestConfig };
 
   const interceptors = {
     request: useInterceptorManager<FullRequestConfig>(),
-    response: useInterceptorManager<ResponseResult<R, any>>(),
+    response: useInterceptorManager<ResponseResult<FullRequestConfig, any>>(),
   };
 
-  const dispatchRequest = <D>(fullRequestConfig: FullRequestConfig) => new Promise<ResponseResult<R, D>>((resolve) => {
+  const dispatchRequest = <D>(fullRequestConfig: FullRequestConfig) => new Promise<ResponseResult<FullRequestConfig, D>>((resolve) => {
     const { host, url, method, header, timeout, data, key } = fullRequestConfig;
     const requestTask = uni.request({
       url: `${host}${url}`,
@@ -134,7 +136,7 @@ function useFetch<R extends BaseRequestConfig>(getBaseRequestConfig: () => R) {
         fullRequestConfig = await onFulfilled(fullRequestConfig);
       }
       catch (error) {
-        return Promise.reject(onRejected ? await onRejected(error) || error : error);
+        return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
 
@@ -148,7 +150,7 @@ function useFetch<R extends BaseRequestConfig>(getBaseRequestConfig: () => R) {
         fullResponseResult = await onFulfilled(fullResponseResult);
       }
       catch (error) {
-        return Promise.reject(onRejected ? await onRejected(error) || error : error);
+        return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
 
@@ -156,7 +158,7 @@ function useFetch<R extends BaseRequestConfig>(getBaseRequestConfig: () => R) {
   };
 
   const request = <D = any>(requestConfig: RequestConfig) => {
-    const fullRequestConfig = merge({ originalRequestConfig: requestConfig }, baseRequestConfig, requestConfig);
+    const fullRequestConfig = merge({ rawRequestConfig: requestConfig }, getOriginalRequestConfig(), requestConfig);
     if (!fullRequestConfig.isDebounce) return core<D>(fullRequestConfig);
     return asyncDebounce(`Request:${simpleHash(stableStringify(requestConfig))}`, () => core<D>(fullRequestConfig));
   };

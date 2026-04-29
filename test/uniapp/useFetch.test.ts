@@ -1,5 +1,5 @@
 import type { BaseRequestConfig } from '@purea/utils';
-import { useFetch } from '@purea/utils';
+import { merge, useFetch } from '@purea/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockUniRequest = vi.fn();
@@ -8,7 +8,7 @@ vi.stubGlobal('uni', {
   request: mockUniRequest,
 });
 
-function getRequestConfig<C extends Record<string, any>>(otherConfig: C) {
+function getOriginalRequestConfig<C extends Record<string, any>>(otherConfig?: C) {
   const baseConfig: BaseRequestConfig = {
     host: 'https://api.example.com',
     header: { 'Content-Type': 'application/json' },
@@ -17,20 +17,11 @@ function getRequestConfig<C extends Record<string, any>>(otherConfig: C) {
     isDebounce: false,
     responseDataPath: '',
   };
-  return { ...baseConfig, otherConfig };
+  return merge(baseConfig, otherConfig);
 }
 
-const BASE_CONFIG: BaseRequestConfig = {
-  host: 'https://api.example.com',
-  header: { 'Content-Type': 'application/json' },
-  timeout: 10000,
-  method: 'GET',
-  isDebounce: false,
-  responseDataPath: '',
-};
-
-function createFetch<T extends Record<string, any>>(overrides: T) {
-  return useFetch(() => ({ ...BASE_CONFIG, ...overrides }));
+function createFetch<T extends Record<string, any>>(overrides?: T) {
+  return useFetch(() => getOriginalRequestConfig(overrides));
 }
 
 function mockSuccessResponse(data: any, statusCode = 200, errMsg = 'request:ok', extras?: Record<string, any>) {
@@ -59,14 +50,8 @@ describe('useFetch', () => {
     it('应该发送请求并返回完整的响应结果', async () => {
       mockSuccessResponse({ id: 1, name: 'test' });
 
-      const fetch = createFetch({ test: 123 });
+      const fetch = createFetch();
       const result = await fetch.request({ url: '/users/1', method: 'GET' });
-
-      fetch.interceptors.request.use(config => {
-        console.log(config.test);
-
-        return config;
-      });
 
       expect(result.code).toBe(200);
       expect(result.data).toEqual({ id: 1, name: 'test' });
@@ -162,7 +147,7 @@ describe('useFetch', () => {
       const requestConfig = { url: '/users', method: 'GET' as const };
       const result = await fetch.request(requestConfig);
 
-      expect(result.requestConfig.originalRequestConfig).toEqual(requestConfig);
+      expect(result.requestConfig.rawRequestConfig).toEqual(requestConfig);
     });
   });
 
@@ -225,7 +210,7 @@ describe('useFetch', () => {
         url: '/fallback',
         method: 'GET' as const,
         host: 'https://api.example.com',
-        originalRequestConfig: { url: '/fallback', method: 'GET' as const },
+        rawRequestConfig: { url: '/fallback', method: 'GET' as const },
         header: { 'Content-Type': 'application/json' },
         timeout: 10000,
       };
@@ -327,7 +312,7 @@ describe('useFetch', () => {
           url: '/fallback',
           method: 'GET' as const,
           host: 'https://api.example.com',
-          originalRequestConfig: { url: '/fallback', method: 'GET' as const },
+          rawRequestConfig: { url: '/fallback', method: 'GET' as const },
         },
       };
 
