@@ -14,7 +14,7 @@ function getOriginalRequestConfig<C extends Record<string, any>>(otherConfig?: C
     header: { 'Content-Type': 'application/json' },
     timeout: 10000,
     method: 'GET',
-    isDebounce: false,
+    isDedup: false,
     responseDataPath: '',
   };
   return merge(baseConfig, otherConfig);
@@ -88,7 +88,7 @@ describe('useFetch', () => {
     });
   });
 
-  describe('get 和 post 方法', () => {
+  describe('请求方法简写', () => {
     it('get 方法应该设置 method 为 GET', async () => {
       mockSuccessResponse([]);
 
@@ -108,6 +108,28 @@ describe('useFetch', () => {
 
       expect(mockUniRequest).toHaveBeenCalledWith(
         expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    it('put 方法应该设置 method 为 PUT', async () => {
+      mockSuccessResponse({ id: 1 });
+
+      const fetch = createFetch();
+      await fetch.put({ url: '/users/1', data: { name: 'updated' } });
+
+      expect(mockUniRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'PUT' })
+      );
+    });
+
+    it('del 方法应该设置 method 为 DELETE', async () => {
+      mockSuccessResponse(null);
+
+      const fetch = createFetch();
+      await fetch.del({ url: '/users/1' });
+
+      expect(mockUniRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'DELETE' })
       );
     });
   });
@@ -456,20 +478,20 @@ describe('useFetch', () => {
     });
   });
 
-  describe('防抖 (isDebounce)', () => {
-    it('isDebounce 为 false 时应该直接发送请求', async () => {
+  describe('请求去重 (isDedup)', () => {
+    it('isDedup 为 false 时应该直接发送请求', async () => {
       mockSuccessResponse({});
 
-      const fetch = createFetch({ isDebounce: false });
+      const fetch = createFetch({ isDedup: false });
       await fetch.request({ url: '/users', method: 'GET' });
 
       expect(mockUniRequest).toHaveBeenCalledTimes(1);
     });
 
-    it('isDebounce 为 true 时相同请求应该防抖', async () => {
+    it('isDedup 为 true 时相同请求应该去重', async () => {
       mockSuccessResponse({ result: 'debounced' });
 
-      const fetch = createFetch({ isDebounce: true });
+      const fetch = createFetch({ isDedup: true });
       const [r1, r2] = await Promise.all([
         fetch.request({ url: '/users', method: 'GET' }),
         fetch.request({ url: '/users', method: 'GET' }),
@@ -480,10 +502,10 @@ describe('useFetch', () => {
       expect(r2.data).toEqual({ result: 'debounced' });
     });
 
-    it('isDebounce 为 true 时不同请求应独立执行', async () => {
+    it('isDedup 为 true 时不同请求应独立执行', async () => {
       mockSuccessResponse({});
 
-      const fetch = createFetch({ isDebounce: true });
+      const fetch = createFetch({ isDedup: true });
       await Promise.all([
         fetch.request({ url: '/users/1', method: 'GET' }),
         fetch.request({ url: '/users/2', method: 'GET' }),

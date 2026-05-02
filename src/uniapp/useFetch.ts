@@ -14,8 +14,8 @@ interface BaseRequestConfig {
   header: Record<string, string>;
   /** 超时时间（单位：毫秒） */
   timeout: number;
-  /** 是否开启防抖处理 */
-  isDebounce: boolean;
+  /** 是否开启请求去重 */
+  isDedup: boolean;
   /** 响应数据路径 */
   responseDataPath: string;
 }
@@ -159,13 +159,17 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
 
   const request = <D = any>(requestConfig: RequestConfig) => {
     const fullRequestConfig = merge({ rawRequestConfig: requestConfig }, getOriginalRequestConfig(), requestConfig);
-    if (!fullRequestConfig.isDebounce) return core<D>(fullRequestConfig);
+    if (!fullRequestConfig.isDedup) return core<D>(fullRequestConfig);
     return asyncDebounce(`Request:${simpleHash(stableStringify(requestConfig))}`, () => core<D>(fullRequestConfig));
   };
 
   const get = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'GET' });
 
   const post = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'POST' });
+
+  const put = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'PUT' });
+
+  const del = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'DELETE' });
 
   return {
     /** 通过请求 key 获取请求任务 */
@@ -178,6 +182,10 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
     get,
     /** 发送 POST 请求 */
     post,
+    /** 发送 PUT 请求 */
+    put,
+    /** 发送 DELETE 请求 */
+    del,
   };
 }
 
