@@ -81,7 +81,7 @@ function simpleHash(str: string): string {
  * @param defaultMsg - 默认错误消息
  * @returns 统一后的状态码：-1=中止，-2=超时，-3=未知错误，其他为原始值
  */
-function getStatusCode(code: number, defaultMsg?: string) {
+function getStatusCode(code?: number, defaultMsg?: string) {
   if (code === undefined && defaultMsg === 'request:fail abort') return -1;
   if (code === undefined && defaultMsg === 'request:fail timeout') return -2;
   return code ?? -3;
