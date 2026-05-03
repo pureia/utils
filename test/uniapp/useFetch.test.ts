@@ -391,7 +391,7 @@ describe('useFetch', () => {
       expect(result.msg).toBe('request:fail');
     });
 
-    it('statusCode 为 undefined 且 errMsg 为 request:fail abort 时 code 应为 0', async () => {
+    it('statusCode 为 undefined 且 errMsg 为 request:fail abort 时应返回 code=-1, msg=Request Abort', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
         complete({ data: null, statusCode: undefined as any, errMsg: 'request:fail abort' });
       });
@@ -399,23 +399,35 @@ describe('useFetch', () => {
       const fetch = createFetch();
       const result = await fetch.request({ url: '/abort', method: 'GET' });
 
-      expect(result.code).toBe(0);
-      expect(result.msg).toBe('request:fail abort');
+      expect(result.code).toBe(-1);
+      expect(result.msg).toBe('Request Abort');
     });
 
-    it('statusCode 为 undefined 且非 abort 时 code 应为 -1', async () => {
+    it('statusCode 为 undefined 且 errMsg 为 request:fail timeout 时应返回 code=-2, msg=Request Timeout', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
         complete({ data: null, statusCode: undefined as any, errMsg: 'request:fail timeout' });
       });
 
       const fetch = createFetch();
-      const result = await fetch.request({ url: '/error', method: 'GET' });
+      const result = await fetch.request({ url: '/timeout', method: 'GET' });
 
-      expect(result.code).toBe(-1);
-      expect(result.msg).toBe('request:fail timeout');
+      expect(result.code).toBe(-2);
+      expect(result.msg).toBe('Request Timeout');
     });
 
-    it('statusCode 为 null 时 code 应为 -1', async () => {
+    it('statusCode 为 undefined 且 errMsg 非 abort/timeout 时应返回 code=-3', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        complete({ data: null, statusCode: undefined as any, errMsg: 'request:fail other' });
+      });
+
+      const fetch = createFetch();
+      const result = await fetch.request({ url: '/other-error', method: 'GET' });
+
+      expect(result.code).toBe(-3);
+      expect(result.msg).toBe('request:fail other');
+    });
+
+    it('statusCode 为 null 时应返回 code=-3', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
         complete({ data: null, statusCode: null as any, errMsg: 'request:fail' });
       });
@@ -423,7 +435,7 @@ describe('useFetch', () => {
       const fetch = createFetch();
       const result = await fetch.request({ url: '/error', method: 'GET' });
 
-      expect(result.code).toBe(-1);
+      expect(result.code).toBe(-3);
     });
 
     it('errMsg 为 undefined 时 msg 应为 Unknown Msg', async () => {

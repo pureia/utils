@@ -67,8 +67,8 @@ function getStatusCode(code: number, defaultMsg?: string) {
 
 /** 获取状态码描述 */
 function getStatusCodeMsg(code: number, defaultMsg?: string) {
-  if (code === undefined && defaultMsg === 'request:fail abort') return 'Request Abort';
-  if (code === undefined && defaultMsg === 'request:fail timeout') return 'Request Timeout';
+  if (code === -1) return 'Request Abort';
+  if (code === -2) return 'Request Timeout';
   return defaultMsg ?? 'Unknown Msg';
 }
 
