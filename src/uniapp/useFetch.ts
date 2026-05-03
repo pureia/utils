@@ -201,6 +201,9 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
     key?: string;
   };
 
+  /** 快捷请求配置，排除了 method（由快捷方法自动设置） */
+  type ShortcutRequestConfig = Omit<RequestConfig, 'method'>;
+
   /** 完整请求配置，合并了默认配置、请求配置和原始请求配置引用 */
   type FullRequestConfig = OriginalRequestConfig & RequestConfig & { readonly rawRequestConfig: RequestConfig };
 
@@ -314,20 +317,20 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
     /** 发送请求，method 由请求配置决定 */
     request,
     /** 发送 GET 请求 */
-    get<D = any>(requestConfig: RequestConfig) {
-      return request<D>({ ...requestConfig, method: 'GET' });
+    get<D = any>(requestConfig: ShortcutRequestConfig) {
+      return request<D>({ ...requestConfig, method: 'GET' } as RequestConfig);
     },
     /** 发送 POST 请求 */
-    post<D = any>(requestConfig: RequestConfig) {
-      return request<D>({ ...requestConfig, method: 'POST' });
+    post<D = any>(requestConfig: ShortcutRequestConfig) {
+      return request<D>({ ...requestConfig, method: 'POST' } as RequestConfig);
     },
     /** 发送 PUT 请求 */
-    put<D = any>(requestConfig: RequestConfig) {
-      return request<D>({ ...requestConfig, method: 'PUT' });
+    put<D = any>(requestConfig: ShortcutRequestConfig) {
+      return request<D>({ ...requestConfig, method: 'PUT' } as RequestConfig);
     },
     /** 发送 DELETE 请求 */
-    delete<D = any>(requestConfig: RequestConfig) {
-      return request<D>({ ...requestConfig, method: 'DELETE' });
+    delete<D = any>(requestConfig: ShortcutRequestConfig) {
+      return request<D>({ ...requestConfig, method: 'DELETE' } as RequestConfig);
     },
   };
 }
