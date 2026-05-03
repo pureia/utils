@@ -163,14 +163,6 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
     return asyncDebounce(`Request:${simpleHash(stableStringify(requestConfig))}`, () => core<D>(fullRequestConfig));
   };
 
-  const get = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'GET' });
-
-  const post = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'POST' });
-
-  const put = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'PUT' });
-
-  const del = <D = any>(requestConfig: RequestConfig) => request<D>({ ...requestConfig, method: 'DELETE' });
-
   return {
     /** 通过请求 key 获取请求任务 */
     getRequestTask: eventStore.get,
@@ -179,13 +171,21 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
     /** 发送请求 */
     request,
     /** 发送 GET 请求 */
-    get,
+    get<D = any>(requestConfig: RequestConfig) {
+      return request<D>({ ...requestConfig, method: 'GET' });
+    },
     /** 发送 POST 请求 */
-    post,
+    post<D = any>(requestConfig: RequestConfig) {
+      return request<D>({ ...requestConfig, method: 'POST' });
+    },
     /** 发送 PUT 请求 */
-    put,
+    put<D = any>(requestConfig: RequestConfig) {
+      return request<D>({ ...requestConfig, method: 'PUT' });
+    },
     /** 发送 DELETE 请求 */
-    del,
+    delete<D = any>(requestConfig: RequestConfig) {
+      return request<D>({ ...requestConfig, method: 'DELETE' });
+    },
   };
 }
 
