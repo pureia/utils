@@ -60,13 +60,15 @@ function simpleHash(str: string): string {
 
 /** 获取状态码 */
 function getStatusCode(code: number, defaultMsg?: string) {
-  if (code === undefined && defaultMsg === 'request:fail abort') return 0;
-  return code ?? -1;
+  if (code === undefined && defaultMsg === 'request:fail abort') return -1;
+  if (code === undefined && defaultMsg === 'request:fail timeout') return -2;
+  return code ?? -3;
 }
 
 /** 获取状态码描述 */
 function getStatusCodeMsg(code: number, defaultMsg?: string) {
   if (code === undefined && defaultMsg === 'request:fail abort') return 'Request Abort';
+  if (code === undefined && defaultMsg === 'request:fail timeout') return 'Request Timeout';
   return defaultMsg ?? 'Unknown Msg';
 }
 
