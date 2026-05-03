@@ -16,8 +16,6 @@ interface BaseRequestConfig {
   timeout: number;
   /** 是否开启请求去重 */
   isDedup: boolean;
-  /** 响应数据路径 */
-  responseDataPath: string;
 }
 
 interface ResponseResult<R, D> {
@@ -60,6 +58,18 @@ function simpleHash(str: string): string {
   return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
 }
 
+/** 获取状态码 */
+function getStatusCode(code: number, defaultMsg?: string) {
+  if (code === undefined && defaultMsg === 'request:fail abort') return 0;
+  return code ?? -1;
+}
+
+/** 获取状态码描述 */
+function getStatusCodeMsg(code: number, defaultMsg?: string) {
+  if (code === undefined && defaultMsg === 'request:fail abort') return 'Request Abort';
+  return defaultMsg ?? 'Unknown Msg';
+}
+
 interface Interceptor<C> {
   fulfilled: (config: C) => C | Promise<C>;
   rejected?: <E>(error: E) => E;
@@ -99,6 +109,7 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
 
   const dispatchRequest = <D>(fullRequestConfig: FullRequestConfig) => new Promise<ResponseResult<FullRequestConfig, D>>((resolve) => {
     const { host, url, method, header, timeout, data, key } = fullRequestConfig;
+
     const requestTask = uni.request({
       url: `${host}${url}`,
       method,
@@ -113,16 +124,23 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
           errMsg: msg,
           statusCode: code,
         } = result as UniApp.GeneralCallbackResult & UniApp.RequestSuccessCallbackResult;
+
+        const statusCode = getStatusCode(code, msg);
+
         resolve({
-          code: code ?? 0,
-          msg: msg ?? '',
+          code: statusCode,
+          msg: getStatusCodeMsg(statusCode, msg),
           data: data as D,
           header: header ?? {},
           cookies: cookies ?? [],
           requestConfig: fullRequestConfig,
         });
+
+        // 请求完成，删除缓存的请求任务
+        key && eventStore.delete(key);
       },
     });
+
     // 存储请求任务，用于取消请求
     key && eventStore.set(key, requestTask);
   });

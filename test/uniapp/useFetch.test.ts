@@ -15,7 +15,6 @@ function getOriginalRequestConfig<C extends Record<string, any>>(otherConfig?: C
     timeout: 10000,
     method: 'GET',
     isDedup: false,
-    responseDataPath: '',
   };
   return merge(baseConfig, otherConfig);
 }
@@ -122,11 +121,11 @@ describe('useFetch', () => {
       );
     });
 
-    it('del 方法应该设置 method 为 DELETE', async () => {
+    it('delete 方法应该设置 method 为 DELETE', async () => {
       mockSuccessResponse(null);
 
       const fetch = createFetch();
-      await fetch.del({ url: '/users/1' });
+      await fetch.delete({ url: '/users/1' });
 
       expect(mockUniRequest).toHaveBeenCalledWith(
         expect.objectContaining({ method: 'DELETE' })
@@ -392,29 +391,42 @@ describe('useFetch', () => {
       expect(result.msg).toBe('request:fail');
     });
 
-    it('statusCode 为 undefined 时 code 应为 0', async () => {
+    it('statusCode 为 undefined 且 errMsg 为 request:fail abort 时 code 应为 0', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
-        complete({ data: null, statusCode: undefined as any, errMsg: '' });
+        complete({ data: null, statusCode: undefined as any, errMsg: 'request:fail abort' });
+      });
+
+      const fetch = createFetch();
+      const result = await fetch.request({ url: '/abort', method: 'GET' });
+
+      expect(result.code).toBe(0);
+      expect(result.msg).toBe('request:fail abort');
+    });
+
+    it('statusCode 为 undefined 且非 abort 时 code 应为 -1', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        complete({ data: null, statusCode: undefined as any, errMsg: 'request:fail timeout' });
       });
 
       const fetch = createFetch();
       const result = await fetch.request({ url: '/error', method: 'GET' });
 
-      expect(result.code).toBe(0);
+      expect(result.code).toBe(-1);
+      expect(result.msg).toBe('request:fail timeout');
     });
 
-    it('statusCode 为 null 时 code 应为 0', async () => {
+    it('statusCode 为 null 时 code 应为 -1', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
-        complete({ data: null, statusCode: null as any, errMsg: '' });
+        complete({ data: null, statusCode: null as any, errMsg: 'request:fail' });
       });
 
       const fetch = createFetch();
       const result = await fetch.request({ url: '/error', method: 'GET' });
 
-      expect(result.code).toBe(0);
+      expect(result.code).toBe(-1);
     });
 
-    it('errMsg 为 undefined 时 msg 应为空字符串', async () => {
+    it('errMsg 为 undefined 时 msg 应为 Unknown Msg', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
         complete({ data: null, statusCode: 200, errMsg: undefined as any });
       });
@@ -422,7 +434,7 @@ describe('useFetch', () => {
       const fetch = createFetch();
       const result = await fetch.request({ url: '/test', method: 'GET' });
 
-      expect(result.msg).toBe('');
+      expect(result.msg).toBe('Unknown Msg');
     });
 
     it('header 为 undefined 时 header 应为空对象', async () => {
