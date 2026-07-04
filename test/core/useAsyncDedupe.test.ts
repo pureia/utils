@@ -1,14 +1,14 @@
-import { useAsyncDebounce } from '@purea/utils';
+import { useAsyncDedupe } from '@purea/utils';
 import { describe, expect, it, vi } from 'vitest';
 
-describe('useAsyncDebounce', () => {
-  const { asyncDebounce: debounce, eventStore } = useAsyncDebounce();
+describe('useAsyncDedupe', () => {
+  const dedupe = useAsyncDedupe();
 
   describe('基本功能', () => {
     it('应该成功执行异步函数并返回结果', async () => {
       const asyncFunc = vi.fn().mockResolvedValue('success');
 
-      const result = await debounce('test-key', asyncFunc);
+      const result = await dedupe('test-key', asyncFunc);
 
       expect(result).toBe('success');
       expect(asyncFunc).toHaveBeenCalledTimes(1);
@@ -17,47 +17,35 @@ describe('useAsyncDebounce', () => {
     it('应该正确传递异步函数的参数', async () => {
       const asyncFunc = vi.fn().mockResolvedValue({ id: 1, name: 'test' });
 
-      const result = await debounce('user-1', asyncFunc);
+      const result = await dedupe('user-1', asyncFunc);
 
       expect(result).toEqual({ id: 1, name: 'test' });
     });
   });
 
   describe('返回值', () => {
-    it('应该返回包含 asyncDebounce 和 eventStore 的对象', () => {
-      const result = useAsyncDebounce();
+    it('应该返回一个函数', () => {
+      const result = useAsyncDedupe();
 
-      expect(result).toHaveProperty('asyncDebounce');
-      expect(result).toHaveProperty('eventStore');
-      expect(typeof result.asyncDebounce).toBe('function');
+      expect(typeof result).toBe('function');
     });
 
-    it('eventStore 应该具有完整的事件存储 API', () => {
-      const { eventStore: es } = useAsyncDebounce();
+    it('请求完成后相同 key 可以重新执行（验证内部状态已清理）', async () => {
+      const dedupe = useAsyncDedupe();
+      let callCount = 0;
+      const asyncFunc = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve(`result-${callCount}`);
+      });
 
-      expect(typeof es.on).toBe('function');
-      expect(typeof es.once).toBe('function');
-      expect(typeof es.emit).toBe('function');
-      expect(typeof es.has).toBe('function');
-      expect(typeof es.get).toBe('function');
-      expect(typeof es.keys).toBe('function');
-      expect(typeof es.delete).toBe('function');
-      expect(typeof es.clear).toBe('function');
-      expect(typeof es.set).toBe('function');
-    });
+      const r1 = await dedupe('status-key', asyncFunc);
+      expect(r1).toBe('result-1');
+      expect(callCount).toBe(1);
 
-    it('eventStore 应该反映内部的请求状态', async () => {
-      const { asyncDebounce: deb, eventStore: es } = useAsyncDebounce();
-
-      expect(es.has('status-key')).toBe(false);
-
-      const promise = deb('status-key', vi.fn().mockResolvedValue('ok'));
-
-      expect(es.has('status-key')).toBe(true);
-
-      await promise;
-
-      expect(es.has('status-key')).toBe(false);
+      // 请求完成后，相同 key 可以重新执行（内部状态已清理）
+      const r2 = await dedupe('status-key', asyncFunc);
+      expect(r2).toBe('result-2');
+      expect(callCount).toBe(2);
     });
   });
 
@@ -66,7 +54,7 @@ describe('useAsyncDebounce', () => {
       const error = new Error('async error');
       const asyncFunc = vi.fn().mockRejectedValue(error);
 
-      await expect(debounce('error-key', asyncFunc)).rejects.toThrow('async error');
+      await expect(dedupe('error-key', asyncFunc)).rejects.toThrow('async error');
       expect(asyncFunc).toHaveBeenCalledTimes(1);
     });
 
@@ -80,7 +68,7 @@ describe('useAsyncDebounce', () => {
       const asyncFunc = vi.fn().mockRejectedValue(new CustomError(500, 'server error'));
 
       try {
-        await debounce('typed-error', asyncFunc);
+        await dedupe('typed-error', asyncFunc);
         expect.fail('should have thrown');
       }
       catch (e) {
@@ -93,21 +81,21 @@ describe('useAsyncDebounce', () => {
       const successFunc = vi.fn().mockResolvedValue('ok');
       const failFunc = vi.fn().mockRejectedValue(new Error('failed'));
 
-      const result1 = await debounce('success-key', successFunc);
-      await expect(debounce('fail-key', failFunc)).rejects.toThrow('failed');
+      const result1 = await dedupe('success-key', successFunc);
+      await expect(dedupe('fail-key', failFunc)).rejects.toThrow('failed');
 
       expect(result1).toBe('ok');
     });
   });
 
-  describe('防抖功能', () => {
+  describe('去重功能', () => {
     it('相同 key 的并发调用应该只执行一次异步函数', async () => {
       const asyncFunc = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(resolve, 50, 'result')));
 
       const promises = await Promise.all([
-        debounce('same-key', asyncFunc),
-        debounce('same-key', asyncFunc),
-        debounce('same-key', asyncFunc),
+        dedupe('same-key', asyncFunc),
+        dedupe('same-key', asyncFunc),
+        dedupe('same-key', asyncFunc),
       ]);
 
       expect(asyncFunc).toHaveBeenCalledTimes(1);
@@ -118,9 +106,9 @@ describe('useAsyncDebounce', () => {
       const asyncFunc = vi.fn().mockResolvedValue('shared');
 
       const [r1, r2, r3] = await Promise.all([
-        debounce('shared-key', asyncFunc),
-        debounce('shared-key', asyncFunc),
-        debounce('shared-key', asyncFunc),
+        dedupe('shared-key', asyncFunc),
+        dedupe('shared-key', asyncFunc),
+        dedupe('shared-key', asyncFunc),
       ]);
 
       expect(r1).toBe('shared');
@@ -134,8 +122,8 @@ describe('useAsyncDebounce', () => {
       const asyncFunc2 = vi.fn().mockResolvedValue('result2');
 
       const [r1, r2] = await Promise.all([
-        debounce('key-1', asyncFunc1),
-        debounce('key-2', asyncFunc2),
+        dedupe('key-1', asyncFunc1),
+        dedupe('key-2', asyncFunc2),
       ]);
 
       expect(r1).toBe('result1');
@@ -147,24 +135,24 @@ describe('useAsyncDebounce', () => {
     it('前一个请求完成后，相同 key 的新请求应该重新执行', async () => {
       const asyncFunc = vi.fn().mockResolvedValue('first');
 
-      const result1 = await debounce('sequential-key', asyncFunc);
+      const result1 = await dedupe('sequential-key', asyncFunc);
       expect(result1).toBe('first');
       expect(asyncFunc).toHaveBeenCalledTimes(1);
 
       asyncFunc.mockResolvedValue('second');
-      const result2 = await debounce('sequential-key', asyncFunc);
+      const result2 = await dedupe('sequential-key', asyncFunc);
       expect(result2).toBe('second');
       expect(asyncFunc).toHaveBeenCalledTimes(2);
     });
 
-    it('防抖应该节省总执行时间', async () => {
+    it('去重应该节省总执行时间', async () => {
       const asyncFunc = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(resolve, 100, 'done')));
 
       const start = Date.now();
       await Promise.all([
-        debounce('timing-key', asyncFunc),
-        debounce('timing-key', asyncFunc),
-        debounce('timing-key', asyncFunc),
+        dedupe('timing-key', asyncFunc),
+        dedupe('timing-key', asyncFunc),
+        dedupe('timing-key', asyncFunc),
       ]);
       const elapsed = Date.now() - start;
 
@@ -177,7 +165,7 @@ describe('useAsyncDebounce', () => {
     it('应该正确推断返回类型', async () => {
       const asyncFunc = vi.fn<() => Promise<{ id: number; name: string }>>().mockResolvedValue({ id: 1, name: 'test' });
 
-      const result = await debounce('typed-key', asyncFunc);
+      const result = await dedupe('typed-key', asyncFunc);
 
       expect(result.id).toBe(1);
       expect(result.name).toBe('test');
@@ -189,9 +177,9 @@ describe('useAsyncDebounce', () => {
       const arrayFunc = vi.fn<() => Promise<number[]>>().mockResolvedValue([1, 2, 3]);
 
       const [s, n, a] = await Promise.all([
-        debounce('string-key', stringFunc),
-        debounce('number-key', numberFunc),
-        debounce('array-key', arrayFunc),
+        dedupe('string-key', stringFunc),
+        dedupe('number-key', numberFunc),
+        dedupe('array-key', arrayFunc),
       ]);
 
       expect(s).toBe('string');
@@ -204,7 +192,7 @@ describe('useAsyncDebounce', () => {
     it('应该处理返回值为 undefined 的异步函数', async () => {
       const asyncFunc = vi.fn().mockResolvedValue(undefined);
 
-      const result = await debounce('undefined-key', asyncFunc);
+      const result = await dedupe('undefined-key', asyncFunc);
 
       expect(result).toBeUndefined();
     });
@@ -212,7 +200,7 @@ describe('useAsyncDebounce', () => {
     it('应该处理返回值为 null 的异步函数', async () => {
       const asyncFunc = vi.fn().mockResolvedValue(null);
 
-      const result = await debounce('null-key', asyncFunc);
+      const result = await dedupe('null-key', asyncFunc);
 
       expect(result).toBeNull();
     });
@@ -222,8 +210,8 @@ describe('useAsyncDebounce', () => {
       const emptyFunc = vi.fn().mockResolvedValue('');
 
       const [zero, empty] = await Promise.all([
-        debounce('zero-key', zeroFunc),
-        debounce('empty-key', emptyFunc),
+        dedupe('zero-key', zeroFunc),
+        dedupe('empty-key', emptyFunc),
       ]);
 
       expect(zero).toBe(0);
@@ -235,13 +223,13 @@ describe('useAsyncDebounce', () => {
         throw new Error('sync error');
       });
 
-      await expect(debounce('sync-error-key', asyncFunc)).rejects.toThrow('sync error');
+      await expect(dedupe('sync-error-key', asyncFunc)).rejects.toThrow('sync error');
     });
 
     it('应该处理空字符串作为 key', async () => {
       const asyncFunc = vi.fn().mockResolvedValue('empty-key-result');
 
-      const result = await debounce('', asyncFunc);
+      const result = await dedupe('', asyncFunc);
 
       expect(result).toBe('empty-key-result');
       expect(asyncFunc).toHaveBeenCalledTimes(1);
@@ -254,9 +242,9 @@ describe('useAsyncDebounce', () => {
       const failFunc = vi.fn().mockRejectedValue(new Error('fail'));
 
       const results = await Promise.allSettled([
-        debounce('mix-success-1', successFunc),
-        debounce('mix-fail', failFunc),
-        debounce('mix-success-2', successFunc),
+        dedupe('mix-success-1', successFunc),
+        dedupe('mix-fail', failFunc),
+        dedupe('mix-success-2', successFunc),
       ]);
 
       expect(results[0].status).toBe('fulfilled');
@@ -267,7 +255,7 @@ describe('useAsyncDebounce', () => {
     it('应该在大量并发调用时只执行一次', async () => {
       const asyncFunc = vi.fn().mockResolvedValue('concurrent');
 
-      const promises = Array.from({ length: 100 }).fill(null).map(() => debounce('massive-key', asyncFunc));
+      const promises = Array.from({ length: 100 }).fill(null).map(() => dedupe('massive-key', asyncFunc));
       const results = await Promise.all(promises);
 
       expect(asyncFunc).toHaveBeenCalledTimes(1);
@@ -282,25 +270,25 @@ describe('useAsyncDebounce', () => {
         return Promise.resolve('success');
       });
 
-      await expect(debounce('retry-after-fail', asyncFunc)).rejects.toThrow('first fail');
+      await expect(dedupe('retry-after-fail', asyncFunc)).rejects.toThrow('first fail');
 
-      const result = await debounce('retry-after-fail', asyncFunc);
+      const result = await dedupe('retry-after-fail', asyncFunc);
       expect(result).toBe('success');
       expect(callCount).toBe(2);
     });
   });
 
   describe('多个实例独立性', () => {
-    it('多个 debounce 实例应该相互独立', async () => {
-      const { asyncDebounce: debounce1 } = useAsyncDebounce();
-      const { asyncDebounce: debounce2 } = useAsyncDebounce();
+    it('多个 dedupe 实例应该相互独立', async () => {
+      const dedupe1 = useAsyncDedupe();
+      const dedupe2 = useAsyncDedupe();
 
       const func1 = vi.fn().mockResolvedValue('result1');
       const func2 = vi.fn().mockResolvedValue('result2');
 
       const [r1, r2] = await Promise.all([
-        debounce1('same-key', func1),
-        debounce2('same-key', func2),
+        dedupe1('same-key', func1),
+        dedupe2('same-key', func2),
       ]);
 
       expect(r1).toBe('result1');
@@ -310,18 +298,18 @@ describe('useAsyncDebounce', () => {
     });
 
     it('同一实例顺序调用相同 key 应该重新执行', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
 
       const func = vi.fn().mockResolvedValue('first');
 
-      const r1 = await deb('seq-key', func);
+      const r1 = await dedupe('seq-key', func);
       expect(r1).toBe('first');
       expect(func).toHaveBeenCalledTimes(1);
 
       func.mockClear();
       func.mockResolvedValue('second');
 
-      const r2 = await deb('seq-key', func);
+      const r2 = await dedupe('seq-key', func);
       expect(r2).toBe('second');
       expect(func).toHaveBeenCalledTimes(1);
     });
@@ -329,16 +317,16 @@ describe('useAsyncDebounce', () => {
 
   describe('竞争条件', () => {
     it('真正的微任务竞争：多个同步调用应该只执行一次 asyncFunc', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       let executionCount = 0;
       const asyncFunc = vi.fn().mockImplementation(() => {
         executionCount++;
         return new Promise(resolve => setTimeout(resolve, 10, `result-${executionCount}`));
       });
 
-      const promise1 = deb('race-key', asyncFunc);
-      const promise2 = deb('race-key', asyncFunc);
-      const promise3 = deb('race-key', asyncFunc);
+      const promise1 = dedupe('race-key', asyncFunc);
+      const promise2 = dedupe('race-key', asyncFunc);
+      const promise3 = dedupe('race-key', asyncFunc);
 
       const results = await Promise.all([promise1, promise2, promise3]);
 
@@ -346,7 +334,7 @@ describe('useAsyncDebounce', () => {
     });
 
     it('事件循环交错竞争：在不同微任务时机发起的调用', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const executionOrder: number[] = [];
       let resolveFirst: () => void;
       let callCount = 0;
@@ -364,10 +352,10 @@ describe('useAsyncDebounce', () => {
         });
       });
 
-      const promise1 = deb('interleave-key', asyncFunc);
+      const promise1 = dedupe('interleave-key', asyncFunc);
 
       await new Promise<void>(resolve => { queueMicrotask(resolve); });
-      const promise2 = deb('interleave-key', asyncFunc);
+      const promise2 = dedupe('interleave-key', asyncFunc);
 
       resolveFirst!();
 
@@ -381,66 +369,66 @@ describe('useAsyncDebounce', () => {
 
   describe('同步异常处理', () => {
     it('asyncFunc 同步抛出异常时应该正确传播', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const syncError = new Error('sync thrown error');
       const asyncFunc = vi.fn().mockImplementation(() => {
         throw syncError;
       });
 
-      await expect(deb('sync-throw-key', asyncFunc)).rejects.toThrow('sync thrown error');
+      await expect(dedupe('sync-throw-key', asyncFunc)).rejects.toThrow('sync thrown error');
     });
 
     it('asyncFunc 返回 rejected promise 时应该正确传播', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const asyncError = new Error('async rejected');
       const asyncFunc = vi.fn().mockRejectedValue(asyncError);
 
-      await expect(deb('async-reject-key', asyncFunc)).rejects.toThrow('async rejected');
+      await expect(dedupe('async-reject-key', asyncFunc)).rejects.toThrow('async rejected');
     });
 
     it('asyncFunc 中访问不存在的属性导致的同步错误', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const asyncFunc = vi.fn().mockImplementation(() => {
         const obj: any = null;
         return Promise.resolve(obj.nonexistentProperty);
       });
 
-      await expect(deb('property-access-key', asyncFunc)).rejects.toThrow();
+      await expect(dedupe('property-access-key', asyncFunc)).rejects.toThrow();
     });
   });
 
   describe('状态清理和内存管理', () => {
     it('请求成功后应该允许相同 key 的新请求', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const func = vi.fn()
         .mockResolvedValueOnce('first-result')
         .mockResolvedValueOnce('second-result');
 
-      const r1 = await deb('cleanup-key', func);
+      const r1 = await dedupe('cleanup-key', func);
       expect(r1).toBe('first-result');
       expect(func).toHaveBeenCalledTimes(1);
 
-      const r2 = await deb('cleanup-key', func);
+      const r2 = await dedupe('cleanup-key', func);
       expect(r2).toBe('second-result');
       expect(func).toHaveBeenCalledTimes(2);
     });
 
     it('请求失败后应该允许相同 key 的新请求', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const func = vi.fn()
         .mockRejectedValueOnce(new Error('first error'))
         .mockResolvedValueOnce('success');
 
-      await expect(deb('retry-key', func)).rejects.toThrow('first error');
+      await expect(dedupe('retry-key', func)).rejects.toThrow('first error');
       expect(func).toHaveBeenCalledTimes(1);
 
-      const result = await deb('retry-key', func);
+      const result = await dedupe('retry-key', func);
       expect(result).toBe('success');
       expect(func).toHaveBeenCalledTimes(2);
     });
 
     it('pending 请求被取消引用后不应该阻止新请求', async () => {
-      const { asyncDebounce: deb, eventStore: es } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       let resolvePending: (value: string) => void;
       const pendingPromise = new Promise<string>(resolve => {
         resolvePending = resolve;
@@ -448,9 +436,9 @@ describe('useAsyncDebounce', () => {
 
       const func = vi.fn().mockReturnValue(pendingPromise);
 
-      const promise1 = deb('pending-key', func);
+      const promise1 = dedupe('pending-key', func);
 
-      const promise2 = deb('pending-key', func);
+      const promise2 = dedupe('pending-key', func);
 
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(func).toHaveBeenCalledTimes(1);
@@ -465,7 +453,7 @@ describe('useAsyncDebounce', () => {
 
   describe('边界情况和极端场景', () => {
     it('asyncFunc 返回 thenable 对象（非 Promise）', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const thenable = {
         then: (onFulfilled: (v: string) => void) => {
           queueMicrotask(() => onFulfilled('thenable-result'));
@@ -473,20 +461,20 @@ describe('useAsyncDebounce', () => {
       };
       const asyncFunc = vi.fn().mockReturnValue(thenable);
 
-      const result = await deb('thenable-key', asyncFunc);
+      const result = await dedupe('thenable-key', asyncFunc);
       expect(result).toBe('thenable-result');
     });
 
     it('并发调用时 asyncFunc 参数被正确忽略（只执行第一个）', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const func1 = vi.fn().mockResolvedValue('func1-result');
       const func2 = vi.fn().mockResolvedValue('func2-result');
       const func3 = vi.fn().mockResolvedValue('func3-result');
 
       const [r1, r2, r3] = await Promise.all([
-        deb('multi-func-key', func1),
-        deb('multi-func-key', func2),
-        deb('multi-func-key', func3),
+        dedupe('multi-func-key', func1),
+        dedupe('multi-func-key', func2),
+        dedupe('multi-func-key', func3),
       ]);
 
       expect(func1).toHaveBeenCalledTimes(1);
@@ -499,14 +487,14 @@ describe('useAsyncDebounce', () => {
     });
 
     it('不同 key 的失败不应该影响其他 key 的 pending 请求', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const failFunc = vi.fn().mockRejectedValue(new Error('fail'));
       const successFunc = vi.fn().mockImplementation(() =>
         new Promise(resolve => setTimeout(resolve, 50, 'success'))
       );
 
-      const promiseFail = deb('fail-key', failFunc);
-      const promiseSuccess = deb('success-key', successFunc);
+      const promiseFail = dedupe('fail-key', failFunc);
+      const promiseSuccess = dedupe('success-key', successFunc);
 
       await expect(promiseFail).rejects.toThrow('fail');
       const result = await promiseSuccess;
@@ -514,51 +502,51 @@ describe('useAsyncDebounce', () => {
     });
 
     it('使用 Symbol 作为 key', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const symKey = Symbol('test-symbol');
       const func = vi.fn().mockResolvedValue('symbol-result');
 
       // @ts-expect-error - 测试 Symbol 作为 key 的行为
-      const result = await deb(symKey, func);
+      const result = await dedupe(symKey, func);
       expect(result).toBe('symbol-result');
     });
 
     it('使用数字作为 key', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const func = vi.fn().mockResolvedValue('number-result');
 
-      const result = await deb(123 as any, func);
+      const result = await dedupe(123 as any, func);
       expect(result).toBe('number-result');
     });
 
     it('极长的 key 字符串', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const longKey = 'a'.repeat(10000);
       const func = vi.fn().mockResolvedValue('long-key-result');
 
-      const result = await deb(longKey, func);
+      const result = await dedupe(longKey, func);
       expect(result).toBe('long-key-result');
     });
 
     it('包含特殊字符的 key', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const specialKey = 'key-with-特殊字符-emoji-🔧-null-\0-tab-\t';
       const func = vi.fn().mockResolvedValue('special-result');
 
-      const result = await deb(specialKey, func);
+      const result = await dedupe(specialKey, func);
       expect(result).toBe('special-result');
     });
   });
 
   describe('性能测试', () => {
     it('大量并发调用不应该造成性能问题', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       const func = vi.fn().mockImplementation(() =>
         new Promise(resolve => setTimeout(resolve, 10, 'perf-result'))
       );
 
       const start = performance.now();
-      const promises = Array.from({ length: 1000 }, () => deb('perf-key', func));
+      const promises = Array.from({ length: 1000 }, () => dedupe('perf-key', func));
       const results = await Promise.all(promises);
       const elapsed = performance.now() - start;
 
@@ -568,14 +556,14 @@ describe('useAsyncDebounce', () => {
     });
 
     it('大量不同 key 的调用应该各自执行', async () => {
-      const { asyncDebounce: deb } = useAsyncDebounce();
+      const dedupe = useAsyncDedupe();
       let callCount = 0;
       const func = vi.fn().mockImplementation(() => {
         callCount++;
         return Promise.resolve(`result-${callCount}`);
       });
 
-      const promises = Array.from({ length: 100 }, (_, i) => deb(`unique-key-${i}`, func));
+      const promises = Array.from({ length: 100 }, (_, i) => dedupe(`unique-key-${i}`, func));
       const results = await Promise.all(promises);
 
       expect(func).toHaveBeenCalledTimes(100);

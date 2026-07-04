@@ -1,5 +1,5 @@
 import { merge } from 'lodash-es';
-import { useAsyncDebounce } from '../core/useAsyncDebounce';
+import { useAsyncDedupe, useEventStore } from '../core';
 
 /** 请求方法类型 */
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
@@ -182,7 +182,8 @@ function useInterceptorManager<C>() {
  * ```
  */
 function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
-  const { asyncDebounce, eventStore } = useAsyncDebounce();
+  const asyncDedupe = useAsyncDedupe();
+  const eventStore = useEventStore();
 
   /** 原始请求配置类型，由 getOriginalRequestConfig 返回值推断 */
   type OriginalRequestConfig = ReturnType<typeof getOriginalRequestConfig>;
@@ -306,7 +307,7 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
   const request = <D = any>(requestConfig: RequestConfig) => {
     const fullRequestConfig = merge({ rawRequestConfig: requestConfig }, getOriginalRequestConfig(), requestConfig);
     if (!fullRequestConfig.isDedup) return core<D>(fullRequestConfig);
-    return asyncDebounce(`Request:${simpleHash(stableStringify(requestConfig))}`, () => core<D>(fullRequestConfig));
+    return asyncDedupe(`Request:${simpleHash(stableStringify(requestConfig))}`, () => core<D>(fullRequestConfig));
   };
 
   return {
