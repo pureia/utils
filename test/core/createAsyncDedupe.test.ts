@@ -1,8 +1,8 @@
-import { useAsyncDedupe } from '@purea/utils';
+import { createAsyncDedupe } from '@purea/utils';
 import { describe, expect, it, vi } from 'vitest';
 
-describe('useAsyncDedupe', () => {
-  const dedupe = useAsyncDedupe();
+describe('createAsyncDedupe', () => {
+  const dedupe = createAsyncDedupe();
 
   describe('基本功能', () => {
     it('应该成功执行异步函数并返回结果', async () => {
@@ -25,13 +25,13 @@ describe('useAsyncDedupe', () => {
 
   describe('返回值', () => {
     it('应该返回一个函数', () => {
-      const result = useAsyncDedupe();
+      const result = createAsyncDedupe();
 
       expect(typeof result).toBe('function');
     });
 
     it('请求完成后相同 key 可以重新执行（验证内部状态已清理）', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       let callCount = 0;
       const asyncFunc = vi.fn().mockImplementation(() => {
         callCount++;
@@ -280,8 +280,8 @@ describe('useAsyncDedupe', () => {
 
   describe('多个实例独立性', () => {
     it('多个 dedupe 实例应该相互独立', async () => {
-      const dedupe1 = useAsyncDedupe();
-      const dedupe2 = useAsyncDedupe();
+      const dedupe1 = createAsyncDedupe();
+      const dedupe2 = createAsyncDedupe();
 
       const func1 = vi.fn().mockResolvedValue('result1');
       const func2 = vi.fn().mockResolvedValue('result2');
@@ -298,7 +298,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('同一实例顺序调用相同 key 应该重新执行', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
 
       const func = vi.fn().mockResolvedValue('first');
 
@@ -317,7 +317,7 @@ describe('useAsyncDedupe', () => {
 
   describe('竞争条件', () => {
     it('真正的微任务竞争：多个同步调用应该只执行一次 asyncFunc', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       let executionCount = 0;
       const asyncFunc = vi.fn().mockImplementation(() => {
         executionCount++;
@@ -334,7 +334,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('事件循环交错竞争：在不同微任务时机发起的调用', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const executionOrder: number[] = [];
       let resolveFirst: () => void;
       let callCount = 0;
@@ -369,7 +369,7 @@ describe('useAsyncDedupe', () => {
 
   describe('同步异常处理', () => {
     it('asyncFunc 同步抛出异常时应该正确传播', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const syncError = new Error('sync thrown error');
       const asyncFunc = vi.fn().mockImplementation(() => {
         throw syncError;
@@ -379,7 +379,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('asyncFunc 返回 rejected promise 时应该正确传播', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const asyncError = new Error('async rejected');
       const asyncFunc = vi.fn().mockRejectedValue(asyncError);
 
@@ -387,7 +387,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('asyncFunc 中访问不存在的属性导致的同步错误', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const asyncFunc = vi.fn().mockImplementation(() => {
         const obj: any = null;
         return Promise.resolve(obj.nonexistentProperty);
@@ -399,7 +399,7 @@ describe('useAsyncDedupe', () => {
 
   describe('状态清理和内存管理', () => {
     it('请求成功后应该允许相同 key 的新请求', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const func = vi.fn()
         .mockResolvedValueOnce('first-result')
         .mockResolvedValueOnce('second-result');
@@ -414,7 +414,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('请求失败后应该允许相同 key 的新请求', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const func = vi.fn()
         .mockRejectedValueOnce(new Error('first error'))
         .mockResolvedValueOnce('success');
@@ -428,7 +428,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('pending 请求被取消引用后不应该阻止新请求', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       let resolvePending: (value: string) => void;
       const pendingPromise = new Promise<string>(resolve => {
         resolvePending = resolve;
@@ -453,7 +453,7 @@ describe('useAsyncDedupe', () => {
 
   describe('边界情况和极端场景', () => {
     it('asyncFunc 返回 thenable 对象（非 Promise）', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const thenable = {
         then: (onFulfilled: (v: string) => void) => {
           queueMicrotask(() => onFulfilled('thenable-result'));
@@ -466,7 +466,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('并发调用时 asyncFunc 参数被正确忽略（只执行第一个）', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const func1 = vi.fn().mockResolvedValue('func1-result');
       const func2 = vi.fn().mockResolvedValue('func2-result');
       const func3 = vi.fn().mockResolvedValue('func3-result');
@@ -487,7 +487,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('不同 key 的失败不应该影响其他 key 的 pending 请求', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const failFunc = vi.fn().mockRejectedValue(new Error('fail'));
       const successFunc = vi.fn().mockImplementation(() =>
         new Promise(resolve => setTimeout(resolve, 50, 'success'))
@@ -502,7 +502,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('使用 Symbol 作为 key', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const symKey = Symbol('test-symbol');
       const func = vi.fn().mockResolvedValue('symbol-result');
 
@@ -512,7 +512,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('使用数字作为 key', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const func = vi.fn().mockResolvedValue('number-result');
 
       const result = await dedupe(123 as any, func);
@@ -520,7 +520,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('极长的 key 字符串', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const longKey = 'a'.repeat(10000);
       const func = vi.fn().mockResolvedValue('long-key-result');
 
@@ -529,7 +529,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('包含特殊字符的 key', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const specialKey = 'key-with-特殊字符-emoji-🔧-null-\0-tab-\t';
       const func = vi.fn().mockResolvedValue('special-result');
 
@@ -540,7 +540,7 @@ describe('useAsyncDedupe', () => {
 
   describe('性能测试', () => {
     it('大量并发调用不应该造成性能问题', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       const func = vi.fn().mockImplementation(() =>
         new Promise(resolve => setTimeout(resolve, 10, 'perf-result'))
       );
@@ -556,7 +556,7 @@ describe('useAsyncDedupe', () => {
     });
 
     it('大量不同 key 的调用应该各自执行', async () => {
-      const dedupe = useAsyncDedupe();
+      const dedupe = createAsyncDedupe();
       let callCount = 0;
       const func = vi.fn().mockImplementation(() => {
         callCount++;

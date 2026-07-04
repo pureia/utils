@@ -1,9 +1,5 @@
 type Handler<T> = (result: T) => void;
 
-type StoreValue<T> = T | Set<Handler<T>>;
-
-type Extensible<T> = T & { [key: string]: any };
-
 /** 事件键类型 */
 type EventKey<T> = keyof T;
 /** 事件载荷类型 */
@@ -28,7 +24,7 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  *   count: number;
  * }
  *
- * const store = useEventStore<Events>();
+ * const store = createEventStore<Events>();
  *
  * // 订阅事件
  * const unsubscribe = store.on('message', (msg) => console.log(msg));
@@ -43,10 +39,9 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * store.emit('count', 2); // 无输出（已自动取消）
  * ```
  */
-function useEventStore<E extends Record<string, any> = Record<string, any>>() {
-  type T = Extensible<E>;
-
-  const store = new Map<EventKey<T>, any>();
+function createEventStore<E extends Record<string, any> = Record<string, any>>() {
+  type EventMap = Set<EventHandler<E, any>>;
+  const store = new Map<EventKey<E>, EventMap>();
 
   /**
    * 获取所有已注册的事件键
@@ -59,28 +54,14 @@ function useEventStore<E extends Record<string, any> = Record<string, any>>() {
    * @param key - 事件键
    * @returns 是否存在监听器
    */
-  const has = <K extends EventKey<T>>(key: K) => store.has(key);
-
-  /**
-   * 获取指定事件的处理程序集合或已设置的值
-   * @param key - 事件键
-   * @returns 事件对应的值（通常为处理程序 Set），不存在时返回 null
-   */
-  const get = <K extends EventKey<T>>(key: K) => (store.get(key) ?? null) as StoreValue<EventPayload<T, K>> | null;
-
-  /**
-   * 设置指定事件的值（通常不需要手动调用，由 on/once 自动管理）
-   * @param key - 事件键
-   * @param value - 要设置的值
-   */
-  function set<K extends EventKey<T>>(key: K, value: StoreValue<EventPayload<T, K>>) { store.set(key, value); }
+  const has = <K extends EventKey<E>>(key: K) => store.has(key);
 
   /**
    * 删除指定事件及其所有处理程序
    * @param key - 事件键
    * @returns 是否成功删除
    */
-  const remove = <K extends EventKey<T>>(key: K) => store.delete(key);
+  const remove = <K extends EventKey<E>>(key: K) => store.delete(key);
 
   /**
    * 清空所有事件及其处理程序
@@ -89,11 +70,15 @@ function useEventStore<E extends Record<string, any> = Record<string, any>>() {
 
   /**
    * 取消指定事件的处理程序
+   *
+   * 推荐使用 `on()` 返回的取消订阅函数来移除处理程序，无需持有原始 handler 引用。
+   * 仅在需要外部精确移除特定 handler 时使用此方法（需持有原始 handler 引用）。
+   *
    * @param key - 事件键
-   * @param handler - 要取消的处理程序
+   * @param handler - 要取消的处理程序（必须与注册时传入的引用相同）
    */
-  function off<K extends EventKey<T>>(key: K, handler: EventHandler<T, K>) {
-    const handlers = get(key) as Set<EventHandler<T, K>> | null;
+  function off<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>) {
+    const handlers = store.get(key);
     handlers?.delete(handler);
     if (handlers?.size === 0) {
       remove(key);
@@ -106,11 +91,11 @@ function useEventStore<E extends Record<string, any> = Record<string, any>>() {
    * @param handler - 事件处理程序
    * @returns 取消订阅函数，调用后移除该处理程序
    */
-  function on<K extends EventKey<T>>(key: K, handler: EventHandler<T, K>): () => void {
-    if (!has(key)) {
-      set(key, new Set());
+  function on<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>): () => void {
+    if (!store.has(key)) {
+      store.set(key, new Set());
     }
-    (get(key) as Set<EventHandler<T, K>>)?.add(handler);
+    store.get(key)!.add(handler);
     return () => off(key, handler);
   }
 
@@ -120,12 +105,12 @@ function useEventStore<E extends Record<string, any> = Record<string, any>>() {
    * @param handler - 事件处理程序（仅执行一次）
    * @returns 取消订阅函数
    */
-  function once<K extends EventKey<T>>(key: K, handler: EventHandler<T, K>): () => void {
-    const onceHandler = (result: EventPayload<T, K>) => {
-      off(key, onceHandler as EventHandler<T, K>);
+  function once<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>): () => void {
+    const onceHandler = (result: EventPayload<E, K>) => {
+      off(key, onceHandler as EventHandler<E, K>);
       handler(result);
     };
-    return on(key, onceHandler as EventHandler<T, K>);
+    return on(key, onceHandler as EventHandler<E, K>);
   }
 
   /**
@@ -136,14 +121,14 @@ function useEventStore<E extends Record<string, any> = Record<string, any>>() {
    * @param key - 事件键
    * @param result - 事件载荷
    */
-  function emit<K extends EventKey<T>>(key: K, result: EventPayload<T, K>): void {
-    const handlers = get(key) as Set<EventHandler<T, K>> | null;
+  function emit<K extends EventKey<E>>(key: K, result: EventPayload<E, K>): void {
+    const handlers = store.get(key);
     handlers?.forEach(handler => {
       try {
         handler(result);
       }
       catch (error) {
-        console.error(`useEventStore error in "${String(key)}":`, error);
+        console.error(`createEventStore error in "${String(key)}":`, error);
       }
     });
   }
@@ -151,16 +136,15 @@ function useEventStore<E extends Record<string, any> = Record<string, any>>() {
   return {
     keys,
     has,
-    get,
-    set,
     delete: remove,
     clear,
+    off,
     on,
     once,
     emit,
   };
 }
 
-export { useEventStore };
+export { createEventStore };
 
-export default useEventStore;
+export default createEventStore;

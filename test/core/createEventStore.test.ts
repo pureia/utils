@@ -1,4 +1,4 @@
-import { useEventStore } from '@purea/utils';
+import { createEventStore } from '@purea/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // 定义测试用的事件类型
@@ -8,8 +8,8 @@ interface TestEvents {
   'message:send': string;
 }
 
-describe('useEventStore', () => {
-  const eventStore = useEventStore<TestEvents>();
+describe('createEventStore', () => {
+  const eventStore = createEventStore<TestEvents>();
 
   afterEach(() => {
     eventStore.clear();
@@ -108,28 +108,11 @@ describe('useEventStore', () => {
     });
   });
 
-  describe('has/get/set/delete/clear', () => {
+  describe('has/delete/clear', () => {
     it('should check if key exists', () => {
       expect(eventStore.has('user:login')).toBe(false);
       eventStore.on('user:login', () => {});
       expect(eventStore.has('user:login')).toBe(true);
-    });
-
-    it('should get stored value', () => {
-      expect(eventStore.get('user:login')).toBeNull();
-
-      eventStore.on('user:login', () => {});
-      const value = eventStore.get('user:login');
-
-      expect(value).toBeInstanceOf(Set);
-    });
-
-    it('should set raw value', () => {
-      const handlers = new Set<(result: { count: number }) => void>();
-
-      eventStore.set('cart:update', handlers);
-      expect(eventStore.has('cart:update')).toBe(true);
-      expect(eventStore.get('cart:update')).toBe(handlers);
     });
 
     it('should clear all entries', () => {
@@ -220,8 +203,8 @@ describe('useEventStore', () => {
 
   describe('multiple instances', () => {
     it('should create independent event stores', () => {
-      const store1 = useEventStore<TestEvents>();
-      const store2 = useEventStore<TestEvents>();
+      const store1 = createEventStore<TestEvents>();
+      const store2 = createEventStore<TestEvents>();
 
       const handler1 = vi.fn();
       const handler2 = vi.fn();

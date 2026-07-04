@@ -1,5 +1,5 @@
 import { merge } from 'lodash-es';
-import { useAsyncDedupe, useEventStore } from '../core';
+import { createAsyncDedupe } from '../core';
 
 /** 请求方法类型 */
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
@@ -7,7 +7,7 @@ type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPT
 /**
  * 基本请求配置
  *
- * 定义每次请求的默认参数，通过 `useFetch` 的 `getOriginalRequestConfig` 参数传入。
+ * 定义每次请求的默认参数，通过 `createFetch` 的 `getOriginalRequestConfig` 参数传入。
  */
 interface BaseRequestConfig {
   /** 主机地址，会与请求 url 拼接为完整请求地址 */
@@ -117,7 +117,7 @@ interface Interceptor<C> {
  * @typeParam C - 拦截器处理的数据类型
  * @returns 拦截器管理器实例，包含 handlers 数组和 use 注册方法
  */
-function useInterceptorManager<C>() {
+function createInterceptorManager<C>() {
   const handlers: Interceptor<C>[] = [];
   /**
    * 注册拦截器
@@ -151,7 +151,7 @@ function useInterceptorManager<C>() {
  *
  * @example
  * ```ts
- * const fetch = useFetch(() => ({
+ * const fetch = createFetch(() => ({
  *   host: 'https://api.example.com',
  *   method: 'GET',
  *   header: { 'Content-Type': 'application/json' },
@@ -181,9 +181,9 @@ function useInterceptorManager<C>() {
  * task?.abort();
  * ```
  */
-function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
-  const asyncDedupe = useAsyncDedupe();
-  const eventStore = useEventStore();
+function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
+  const asyncDedupe = createAsyncDedupe();
+  const requestTaskMap = new Map<string, UniApp.RequestTask>();
 
   /** 原始请求配置类型，由 getOriginalRequestConfig 返回值推断 */
   type OriginalRequestConfig = ReturnType<typeof getOriginalRequestConfig>;
@@ -209,8 +209,8 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
   type FullRequestConfig = OriginalRequestConfig & RequestConfig & { readonly rawRequestConfig: RequestConfig };
 
   const interceptors = {
-    request: useInterceptorManager<FullRequestConfig>(),
-    response: useInterceptorManager<ResponseResult<FullRequestConfig, any>>(),
+    request: createInterceptorManager<FullRequestConfig>(),
+    response: createInterceptorManager<ResponseResult<FullRequestConfig, any>>(),
   };
 
   /**
@@ -250,12 +250,12 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
         });
 
         // 请求完成，删除缓存的请求任务
-        key && eventStore.delete(key);
+        key && requestTaskMap.delete(key);
       },
     });
 
     // 存储请求任务，用于取消请求
-    key && eventStore.set(key, requestTask);
+    key && requestTaskMap.set(key, requestTask);
   });
 
   /**
@@ -312,7 +312,7 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
 
   return {
     /** 通过请求 key 获取已存储的请求任务，可用于调用 abort() 取消请求 */
-    getRequestTask: eventStore.get,
+    getRequestTask: (key: string) => requestTaskMap.get(key) ?? null,
     /** 拦截器管理器，包含 request（请求拦截）和 response（响应拦截） */
     interceptors,
     /** 发送请求，method 由请求配置决定 */
@@ -336,6 +336,6 @@ function useFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R
   };
 }
 
-export { type BaseRequestConfig, useFetch };
+export { type BaseRequestConfig, createFetch };
 
-export default useFetch;
+export default createFetch;

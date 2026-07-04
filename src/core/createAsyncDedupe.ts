@@ -1,4 +1,4 @@
-import useEventStore from './useEventStore';
+import createEventStore from './createEventStore';
 
 /**
  * 创建一个异步去重函数，确保同一 key 的异步操作只执行一次，所有调用共享同一结果。
@@ -7,13 +7,13 @@ import useEventStore from './useEventStore';
  * 其余调用会等待并共享第一次调用的结果（无论是成功还是失败）。
  * 前一次请求完成后，相同 key 的新请求会重新执行。
  *
- * 内部基于 `useEventStore` 实现事件的发布/订阅，利用微任务调度异步函数的执行。
+ * 内部基于 `createEventStore` 实现事件的发布/订阅，利用微任务调度异步函数的执行。
  *
  * @returns 返回一个去重执行的异步函数 `asyncDedupe(key, asyncFunc)`
  *
  * @example
  * ```ts
- * const asyncDedupe = useAsyncDedupe();
+ * const asyncDedupe = createAsyncDedupe();
  *
  * // 多次调用只会执行一次 fetch
  * const [r1, r2] = await Promise.all([
@@ -26,8 +26,8 @@ import useEventStore from './useEventStore';
  * const r3 = await asyncDedupe('user-1', () => fetchUser(1)); // 重新执行
  * ```
  */
-function useAsyncDedupe() {
-  const eventStore = useEventStore();
+function createAsyncDedupe() {
+  const eventStore = createEventStore();
 
   /**
    * 去重执行异步函数
@@ -58,6 +58,6 @@ function useAsyncDedupe() {
   return asyncDedupe;
 }
 
-export { useAsyncDedupe };
+export { createAsyncDedupe };
 
-export default useAsyncDedupe;
+export default createAsyncDedupe;

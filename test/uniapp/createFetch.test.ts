@@ -1,5 +1,5 @@
 import type { BaseRequestConfig } from '@purea/utils';
-import { merge, useFetch } from '@purea/utils';
+import { createFetch as _createFetch, merge } from '@purea/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockUniRequest = vi.fn();
@@ -20,7 +20,7 @@ function getOriginalRequestConfig<C extends Record<string, any>>(otherConfig?: C
 }
 
 function createFetch<T extends Record<string, any>>(overrides?: T) {
-  return useFetch(() => getOriginalRequestConfig(overrides));
+  return _createFetch(() => getOriginalRequestConfig(overrides));
 }
 
 function mockSuccessResponse(data: any, statusCode = 200, errMsg = 'request:ok', extras?: Record<string, any>) {
@@ -44,7 +44,7 @@ afterEach(() => {
   mockUniRequest.mockReset();
 });
 
-describe('useFetch', () => {
+describe('createFetch', () => {
   describe('request', () => {
     it('应该发送请求并返回完整的响应结果', async () => {
       mockSuccessResponse({ id: 1, name: 'test' });

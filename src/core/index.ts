@@ -1,2 +1,2 @@
-export * from './useEventStore';
-export * from './useAsyncDedupe';
+export * from './createEventStore';
+export * from './createAsyncDedupe';
