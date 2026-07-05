@@ -1,4 +1,4 @@
-import { merge } from 'lodash-es';
+import { merge } from '../.';
 import { createAsyncDedupe } from '../core';
 
 /** 请求方法类型 */
