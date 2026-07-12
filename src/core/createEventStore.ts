@@ -80,9 +80,7 @@ function createEventStore<E extends Record<string, any> = Record<string, any>>()
   function off<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>) {
     const handlers = store.get(key);
     handlers?.delete(handler);
-    if (handlers?.size === 0) {
-      remove(key);
-    }
+    handlers?.size === 0 && remove(key);
   }
 
   /**
@@ -92,9 +90,7 @@ function createEventStore<E extends Record<string, any> = Record<string, any>>()
    * @returns 取消订阅函数，调用后移除该处理程序
    */
   function on<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>): () => void {
-    if (!store.has(key)) {
-      store.set(key, new Set());
-    }
+    !store.has(key) && store.set(key, new Set());
     store.get(key)!.add(handler);
     return () => off(key, handler);
   }
