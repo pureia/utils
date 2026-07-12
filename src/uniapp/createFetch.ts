@@ -49,12 +49,8 @@ interface ResponseResult<R, D> {
  * @returns 稳定的 JSON 字符串
  */
 function stableStringify(obj: any): string {
-  if (obj === null || typeof obj !== 'object') {
-    return JSON.stringify(obj);
-  }
-  if (Array.isArray(obj)) {
-    return `[${obj.map(stableStringify).join(',')}]`;
-  }
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return `[${obj.map(stableStringify).join(',')}]`;
   const sortedKeys = Object.keys(obj).sort();
   const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${stableStringify(obj[key])}`);
   return `{${pairs.join(',')}}`;
