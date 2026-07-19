@@ -1,4 +1,8 @@
-import createEventStore from './createEventStore';
+import createEventEmitter from './createEventEmitter';
+
+interface AsyncDedupeEvents {
+  [key: string]: { fulfilled: unknown } | { rejected: unknown };
+}
 
 /**
  * 创建一个异步去重函数，确保同一 key 的异步操作只执行一次，所有调用共享同一结果。
@@ -7,7 +11,7 @@ import createEventStore from './createEventStore';
  * 其余调用会等待并共享第一次调用的结果（无论是成功还是失败）。
  * 前一次请求完成后，相同 key 的新请求会重新执行。
  *
- * 内部基于 `createEventStore` 实现事件的发布/订阅，利用微任务调度异步函数的执行。
+ * 内部基于 `createEventEmitter` 实现事件的发布/订阅，利用微任务调度异步函数的执行。
  *
  * @returns 返回一个去重执行的异步函数 `asyncDedupe(key, asyncFunc)`
  *
@@ -27,7 +31,7 @@ import createEventStore from './createEventStore';
  * ```
  */
 function createAsyncDedupe() {
-  const eventStore = createEventStore();
+  const eventEmitter = createEventEmitter<AsyncDedupeEvents>();
 
   /**
    * 去重执行异步函数
@@ -43,15 +47,15 @@ function createAsyncDedupe() {
    */
   function asyncDedupe<V>(key: string, asyncFunc: () => Promise<V>): Promise<V> {
     // 如果事件已存在，说明已有相同 key 的请求在进行中，不再重复执行
-    !eventStore.has(key) && Promise.resolve().then(() => asyncFunc()).then(result => {
-      eventStore.emit(key, { fulfilled: result });
+    !eventEmitter.has(key) && Promise.resolve().then(() => asyncFunc()).then(result => {
+      eventEmitter.emit(key, { fulfilled: result });
     }).catch(error => {
-      eventStore.emit(key, { rejected: error });
+      eventEmitter.emit(key, { rejected: error });
     });
 
     // 返回一个 Promise，等待事件触发后 resolve 或 reject
     return new Promise<V>((resolve, reject) => {
-      eventStore.once(key, result => 'rejected' in result ? reject(result.rejected) : resolve(result.fulfilled!));
+      eventEmitter.once(key, result => 'rejected' in result ? reject(result.rejected) : resolve(result.fulfilled! as V));
     });
   };
 

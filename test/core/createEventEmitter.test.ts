@@ -1,4 +1,4 @@
-import { createEventStore } from '@purea/utils';
+import { createEventEmitter } from '@purea/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // 定义测试用的事件类型
@@ -8,19 +8,19 @@ interface TestEvents {
   'message:send': string;
 }
 
-describe('createEventStore', () => {
-  const eventStore = createEventStore<TestEvents>();
+describe('createEventEmitter', () => {
+  const eventEmitter = createEventEmitter<TestEvents>();
 
   afterEach(() => {
-    eventStore.clear();
+    eventEmitter.clear();
   });
 
   describe('on/emit', () => {
     it('should subscribe and emit events', () => {
       const handler = vi.fn();
 
-      eventStore.on('user:login', handler);
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.on('user:login', handler);
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith({ userId: '1', name: 'John' });
@@ -30,9 +30,9 @@ describe('createEventStore', () => {
       const handler1 = vi.fn();
       const handler2 = vi.fn();
 
-      eventStore.on('user:login', handler1);
-      eventStore.on('user:login', handler2);
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.on('user:login', handler1);
+      eventEmitter.on('user:login', handler2);
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
 
       expect(handler1).toHaveBeenCalledTimes(1);
       expect(handler2).toHaveBeenCalledTimes(1);
@@ -41,9 +41,9 @@ describe('createEventStore', () => {
     it('should return unsubscribe function', () => {
       const handler = vi.fn();
 
-      const unsubscribe = eventStore.on('user:login', handler);
+      const unsubscribe = eventEmitter.on('user:login', handler);
       unsubscribe();
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
 
       expect(handler).not.toHaveBeenCalled();
     });
@@ -53,9 +53,9 @@ describe('createEventStore', () => {
     it('should trigger handler only once', () => {
       const handler = vi.fn();
 
-      eventStore.once('user:login', handler);
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
-      eventStore.emit('user:login', { userId: '2', name: 'Jane' });
+      eventEmitter.once('user:login', handler);
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.emit('user:login', { userId: '2', name: 'Jane' });
 
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith({ userId: '1', name: 'John' });
@@ -64,9 +64,9 @@ describe('createEventStore', () => {
     it('should return unsubscribe function', () => {
       const handler = vi.fn();
 
-      const unsubscribe = eventStore.once('user:login', handler);
+      const unsubscribe = eventEmitter.once('user:login', handler);
       unsubscribe();
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
 
       expect(handler).not.toHaveBeenCalled();
     });
@@ -77,10 +77,10 @@ describe('createEventStore', () => {
       const handler1 = vi.fn();
       const handler2 = vi.fn();
 
-      const unsubscribe1 = eventStore.on('user:login', handler1);
-      eventStore.on('user:login', handler2);
+      const unsubscribe1 = eventEmitter.on('user:login', handler1);
+      eventEmitter.on('user:login', handler2);
       unsubscribe1();
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
 
       expect(handler1).not.toHaveBeenCalled();
       expect(handler2).toHaveBeenCalledTimes(1);
@@ -96,9 +96,9 @@ describe('createEventStore', () => {
 
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      eventStore.on('message:send', errorHandler);
-      eventStore.on('message:send', normalHandler);
-      eventStore.emit('message:send', 'hello');
+      eventEmitter.on('message:send', errorHandler);
+      eventEmitter.on('message:send', normalHandler);
+      eventEmitter.emit('message:send', 'hello');
 
       expect(errorHandler).toHaveBeenCalledTimes(1);
       expect(normalHandler).toHaveBeenCalledTimes(1);
@@ -110,25 +110,25 @@ describe('createEventStore', () => {
 
   describe('has/delete/clear', () => {
     it('should check if key exists', () => {
-      expect(eventStore.has('user:login')).toBe(false);
-      eventStore.on('user:login', () => {});
-      expect(eventStore.has('user:login')).toBe(true);
+      expect(eventEmitter.has('user:login')).toBe(false);
+      eventEmitter.on('user:login', () => {});
+      expect(eventEmitter.has('user:login')).toBe(true);
     });
 
     it('should clear all entries', () => {
-      eventStore.on('user:login', () => {});
-      eventStore.on('cart:update', () => {});
-      eventStore.clear();
+      eventEmitter.on('user:login', () => {});
+      eventEmitter.on('cart:update', () => {});
+      eventEmitter.clear();
 
-      expect(eventStore.has('user:login')).toBe(false);
-      expect(eventStore.has('cart:update')).toBe(false);
+      expect(eventEmitter.has('user:login')).toBe(false);
+      expect(eventEmitter.has('cart:update')).toBe(false);
     });
 
     it('should delete specific key', () => {
-      eventStore.on('user:login', () => {});
-      eventStore.delete('user:login');
+      eventEmitter.on('user:login', () => {});
+      eventEmitter.delete('user:login');
 
-      expect(eventStore.has('user:login')).toBe(false);
+      expect(eventEmitter.has('user:login')).toBe(false);
     });
   });
 
@@ -136,8 +136,8 @@ describe('createEventStore', () => {
     it('should provide type-safe event data', () => {
       const handler = vi.fn<(result: { count: number }) => void>();
 
-      eventStore.on('cart:update', handler);
-      eventStore.emit('cart:update', { count: 5 });
+      eventEmitter.on('cart:update', handler);
+      eventEmitter.emit('cart:update', { count: 5 });
 
       expect(handler).toHaveBeenCalledWith({ count: 5 });
     });
@@ -145,17 +145,17 @@ describe('createEventStore', () => {
 
   describe('edge cases', () => {
     it('should handle emit with no subscribers gracefully', () => {
-      expect(() => eventStore.emit('user:login', { userId: '1', name: 'John' })).not.toThrow();
+      expect(() => eventEmitter.emit('user:login', { userId: '1', name: 'John' })).not.toThrow();
     });
 
     it('should handle multiple once subscriptions independently', () => {
       const handler1 = vi.fn();
       const handler2 = vi.fn();
 
-      eventStore.once('user:login', handler1);
-      eventStore.once('user:login', handler2);
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
-      eventStore.emit('user:login', { userId: '2', name: 'Jane' });
+      eventEmitter.once('user:login', handler1);
+      eventEmitter.once('user:login', handler2);
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.emit('user:login', { userId: '2', name: 'Jane' });
 
       expect(handler1).toHaveBeenCalledTimes(1);
       expect(handler2).toHaveBeenCalledTimes(1);
@@ -164,25 +164,25 @@ describe('createEventStore', () => {
     it('should handle off for non-existent handler gracefully', () => {
       const handler = vi.fn();
 
-      eventStore.on('user:login', () => {});
+      eventEmitter.on('user:login', () => {});
       expect(() => {
-        const unsubscribe = eventStore.on('user:login', handler);
+        const unsubscribe = eventEmitter.on('user:login', handler);
         unsubscribe();
         unsubscribe();
       }).not.toThrow();
     });
 
     it('should handle deleting non-existent key gracefully', () => {
-      expect(() => eventStore.delete('user:login')).not.toThrow();
-      expect(eventStore.has('user:login')).toBe(false);
+      expect(() => eventEmitter.delete('user:login')).not.toThrow();
+      expect(eventEmitter.has('user:login')).toBe(false);
     });
 
     it('should not duplicate same handler for same event', () => {
       const handler = vi.fn();
 
-      eventStore.on('user:login', handler);
-      eventStore.on('user:login', handler);
-      eventStore.emit('user:login', { userId: '1', name: 'John' });
+      eventEmitter.on('user:login', handler);
+      eventEmitter.on('user:login', handler);
+      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
 
       expect(handler).toHaveBeenCalledTimes(1);
     });
@@ -190,34 +190,35 @@ describe('createEventStore', () => {
 
   describe('keys', () => {
     it('should return all registered event keys', () => {
-      expect(eventStore.keys()).toEqual([]);
+      const keys = eventEmitter.keys();
+      expect([...keys]).toEqual([]);
 
-      eventStore.on('user:login', () => {});
-      eventStore.on('cart:update', () => {});
-      expect(eventStore.keys()).toEqual(['user:login', 'cart:update']);
+      eventEmitter.on('user:login', () => {});
+      eventEmitter.on('cart:update', () => {});
+      expect([...eventEmitter.keys()]).toEqual(['user:login', 'cart:update']);
 
-      eventStore.delete('user:login');
-      expect(eventStore.keys()).toEqual(['cart:update']);
+      eventEmitter.delete('user:login');
+      expect([...eventEmitter.keys()]).toEqual(['cart:update']);
     });
   });
 
   describe('multiple instances', () => {
-    it('should create independent event stores', () => {
-      const store1 = createEventStore<TestEvents>();
-      const store2 = createEventStore<TestEvents>();
+    it('should create independent event emitters', () => {
+      const emitter1 = createEventEmitter<TestEvents>();
+      const emitter2 = createEventEmitter<TestEvents>();
 
       const handler1 = vi.fn();
       const handler2 = vi.fn();
 
-      store1.on('user:login', handler1);
-      store2.on('user:login', handler2);
+      emitter1.on('user:login', handler1);
+      emitter2.on('user:login', handler2);
 
-      store1.emit('user:login', { userId: '1', name: 'John' });
+      emitter1.emit('user:login', { userId: '1', name: 'John' });
 
       expect(handler1).toHaveBeenCalledTimes(1);
       expect(handler2).not.toHaveBeenCalled();
 
-      store2.emit('user:login', { userId: '2', name: 'Jane' });
+      emitter2.emit('user:login', { userId: '2', name: 'Jane' });
 
       expect(handler1).toHaveBeenCalledTimes(1);
       expect(handler2).toHaveBeenCalledTimes(1);

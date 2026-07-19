@@ -8,14 +8,14 @@ type EventPayload<T, K extends EventKey<T>> = T[K];
 type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
 
 /**
- * 创建一个类型安全的事件存储实例，用于事件的发布/订阅管理。
+ * 创建一个类型安全的事件发射器实例，用于事件的发布/订阅管理。
  *
  * 支持 `on` 持续订阅和 `once` 一次性订阅，所有事件键和载荷均为类型安全。
  * 同一事件可注册多个处理程序，处理程序中的错误不会影响其他处理程序的执行。
  * 订阅函数会返回取消订阅函数，方便在组件卸载时清理。
  *
  * @typeParam E - 事件定义对象，键为事件名，值为事件载荷类型
- * @returns 事件存储实例
+ * @returns 事件发射器实例
  *
  * @example
  * ```ts
@@ -24,30 +24,29 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  *   count: number;
  * }
  *
- * const store = createEventStore<Events>();
+ * const emitter = createEventEmitter<Events>();
  *
  * // 订阅事件
- * const unsubscribe = store.on('message', (msg) => console.log(msg));
- * store.emit('message', 'hello'); // 输出: hello
+ * const unsubscribe = emitter.on('message', (msg) => console.log(msg));
+ * emitter.emit('message', 'hello'); // 输出: hello
  *
  * // 取消订阅
  * unsubscribe();
  *
  * // 一次性订阅
- * store.once('count', (n) => console.log(n));
- * store.emit('count', 1); // 输出: 1
- * store.emit('count', 2); // 无输出（已自动取消）
+ * emitter.once('count', (n) => console.log(n));
+ * emitter.emit('count', 1); // 输出: 1
+ * emitter.emit('count', 2); // 无输出（已自动取消）
  * ```
  */
-function createEventStore<E extends Record<string, any> = Record<string, any>>() {
-  type EventMap = Set<EventHandler<E, any>>;
-  const store = new Map<EventKey<E>, EventMap>();
+function createEventEmitter<E extends Record<string, any> = Record<string, any>>() {
+  const store = new Map<EventKey<E>, Set<(result: E[EventKey<E>]) => void>>();
 
   /**
    * 获取所有已注册的事件键
-   * @returns 事件键数组
+   * @returns 事件键迭代器
    */
-  const keys = () => [...store.keys()];
+  const keys = (): IterableIterator<EventKey<E>> => store.keys();
 
   /**
    * 检查指定事件是否已注册监听器
@@ -79,7 +78,7 @@ function createEventStore<E extends Record<string, any> = Record<string, any>>()
    */
   function off<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>) {
     const handlers = store.get(key);
-    handlers?.delete(handler);
+    handlers?.delete(handler as (result: E[EventKey<E>]) => void);
     handlers?.size === 0 && remove(key);
   }
 
@@ -91,7 +90,7 @@ function createEventStore<E extends Record<string, any> = Record<string, any>>()
    */
   function on<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>): () => void {
     !store.has(key) && store.set(key, new Set());
-    store.get(key)!.add(handler);
+    store.get(key)!.add(handler as (result: E[EventKey<E>]) => void);
     return () => off(key, handler);
   }
 
@@ -124,7 +123,7 @@ function createEventStore<E extends Record<string, any> = Record<string, any>>()
         handler(result);
       }
       catch (error) {
-        console.error(`createEventStore error in "${String(key)}":`, error);
+        console.error(`createEventEmitter error in "${String(key)}":`, error);
       }
     });
   }
@@ -141,6 +140,6 @@ function createEventStore<E extends Record<string, any> = Record<string, any>>()
   };
 }
 
-export { createEventStore };
+export { createEventEmitter };
 
-export default createEventStore;
+export default createEventEmitter;
