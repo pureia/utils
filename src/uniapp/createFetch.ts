@@ -178,7 +178,7 @@ function createInterceptorManager<C>() {
  * ```
  */
 function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
-  const asyncDedupe = createAsyncDedupe();
+  const { asyncDedupe } = createAsyncDedupe();
   const requestTaskMap = new Map<string, UniApp.RequestTask>();
 
   /** 原始请求配置类型，由 getOriginalRequestConfig 返回值推断 */
