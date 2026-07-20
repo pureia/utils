@@ -13,11 +13,11 @@ interface AsyncDedupeEvents {
  *
  * 内部基于 `createEventEmitter` 实现事件的发布/订阅，利用微任务调度异步函数的执行。
  *
- * @returns 返回 `{ asyncDedupe, cancel }`，其中 `asyncDedupe` 是去重执行函数，`cancel` 是取消函数
+ * @returns 返回 `{ asyncDedupe, cancelCall }`，其中 `asyncDedupe` 是去重执行函数，`cancelCall` 是取消进行中调用的函数
  *
  * @example
  * ```ts
- * const { asyncDedupe, cancel } = createAsyncDedupe();
+ * const { asyncDedupe, cancelCall } = createAsyncDedupe();
  *
  * // 多次调用只会执行一次 fetch
  * const [r1, r2] = await Promise.all([
@@ -26,8 +26,8 @@ interface AsyncDedupeEvents {
  * ]);
  * // r1 和 r2 得到相同的结果，fetchUser 只被调用一次
  *
- * // 取消进行中的请求
- * cancel('user-1');
+ * // 取消进行中的调用
+ * cancelCall('user-1');
  *
  * // 请求完成后，相同 key 的新请求会重新执行
  * const r3 = await asyncDedupe('user-1', () => fetchUser(1)); // 重新执行
@@ -36,7 +36,7 @@ interface AsyncDedupeEvents {
 function createAsyncDedupe() {
   const eventEmitter = createEventEmitter<AsyncDedupeEvents>();
 
-  const getCancelKey = (key: string) => `${String(key)}-cancel`;
+  const getCancelCallKey = (key: string) => `${String(key)}-cancel-call`;
 
   /**
    * 执行异步函数，处理取消事件
@@ -48,12 +48,12 @@ function createAsyncDedupe() {
    */
   const execute = <V>(key: string, asyncFunc: () => Promise<V>) => new Promise<V>((resolve, reject) => {
     // 监听取消事件，拒绝 Promise
-    eventEmitter.once(getCancelKey(key), result => reject((result as { rejected: Error }).rejected));
+    eventEmitter.once(getCancelCallKey(key), result => reject((result as { rejected: Error }).rejected));
 
-    Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => eventEmitter.delete(getCancelKey(key)));
+    Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => eventEmitter.delete(getCancelCallKey(key)));
   });
 
-  const cancel = (key: string) => eventEmitter.emit(getCancelKey(key), { rejected: new Error(`${key} async dedupe function canceled`) });
+  const cancelCall = (key: string) => eventEmitter.emit(getCancelCallKey(key), { rejected: new Error(`${key} async call canceled`) });
 
   /**
    * 去重执行异步函数
@@ -81,7 +81,7 @@ function createAsyncDedupe() {
     });
   };
 
-  return { asyncDedupe, cancel };
+  return { asyncDedupe, cancelCall };
 }
 
 export { createAsyncDedupe };

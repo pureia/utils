@@ -24,11 +24,11 @@ describe('createAsyncDedupe', () => {
   });
 
   describe('返回值', () => {
-    it('应该返回包含 asyncDedupe 和 cancel 的对象', () => {
-      const { asyncDedupe, cancel } = createAsyncDedupe();
+    it('应该返回包含 asyncDedupe 和 cancelCall 的对象', () => {
+      const { asyncDedupe, cancelCall } = createAsyncDedupe();
 
       expect(typeof asyncDedupe).toBe('function');
-      expect(typeof cancel).toBe('function');
+      expect(typeof cancelCall).toBe('function');
     });
 
     it('请求完成后相同 key 可以重新执行（验证内部状态已清理）', async () => {
@@ -572,25 +572,25 @@ describe('createAsyncDedupe', () => {
     });
   });
 
-  describe('cancel 功能', () => {
-    it('cancel 应该拒绝进行中的去重请求', async () => {
-      const { asyncDedupe, cancel } = createAsyncDedupe();
+  describe('cancelCall 功能', () => {
+    it('cancelCall 应该拒绝进行中的去重调用', async () => {
+      const { asyncDedupe, cancelCall } = createAsyncDedupe();
       let resolveLater!: (value: string) => void;
       const pendingPromise = new Promise<string>(resolve => { resolveLater = resolve; });
       const func = vi.fn().mockReturnValue(pendingPromise);
 
       const promise = asyncDedupe('cancel-key', func);
-      // 等待微任务，确保 execute 已注册 cancel 监听器
+      // 等待微任务，确保 execute 已注册 cancelCall 监听器
       await new Promise<void>(r => queueMicrotask(r));
-      cancel('cancel-key');
+      cancelCall('cancel-key');
       resolveLater('resolved');
 
-      await expect(promise).rejects.toThrow('cancel-key async dedupe function canceled');
+      await expect(promise).rejects.toThrow('cancel-key async call canceled');
       expect(func).toHaveBeenCalledTimes(1);
     });
 
-    it('cancel 后相同 key 可以重新请求', async () => {
-      const { asyncDedupe, cancel } = createAsyncDedupe();
+    it('cancelCall 后相同 key 可以重新请求', async () => {
+      const { asyncDedupe, cancelCall } = createAsyncDedupe();
       let resolveLater!: (value: string) => void;
       const pendingPromise = new Promise<string>(resolve => { resolveLater = resolve; });
       const func1 = vi.fn().mockReturnValue(pendingPromise);
@@ -598,7 +598,7 @@ describe('createAsyncDedupe', () => {
 
       const p1 = asyncDedupe('retry-key', func1);
       await new Promise<void>(r => queueMicrotask(r));
-      cancel('retry-key');
+      cancelCall('retry-key');
       resolveLater('resolved');
       await expect(p1).rejects.toThrow();
       expect(func1).toHaveBeenCalledTimes(1);
@@ -608,8 +608,8 @@ describe('createAsyncDedupe', () => {
       expect(func2).toHaveBeenCalledTimes(1);
     });
 
-    it('cancel 某个 key 不应影响其他 key', async () => {
-      const { asyncDedupe, cancel } = createAsyncDedupe();
+    it('cancelCall 某个 key 不应影响其他 key', async () => {
+      const { asyncDedupe, cancelCall } = createAsyncDedupe();
       let resolveA!: (value: string) => void;
       const pendingA = new Promise<string>(resolve => { resolveA = resolve; });
       const funcA = vi.fn().mockReturnValue(pendingA);
@@ -619,7 +619,7 @@ describe('createAsyncDedupe', () => {
       const pB = asyncDedupe('key-b', funcB);
 
       await new Promise<void>(r => queueMicrotask(r));
-      cancel('key-a');
+      cancelCall('key-a');
       resolveA('resolved');
       await expect(pA).rejects.toThrow();
 
@@ -627,10 +627,10 @@ describe('createAsyncDedupe', () => {
       expect(resultB).toBe('result-b');
     });
 
-    it('cancel 不存在的 key 不应抛出异常', () => {
-      const { cancel } = createAsyncDedupe();
+    it('cancelCall 不存在的 key 不应抛出异常', () => {
+      const { cancelCall } = createAsyncDedupe();
 
-      expect(() => cancel('nonexistent-key')).not.toThrow();
+      expect(() => cancelCall('nonexistent-key')).not.toThrow();
     });
   });
 });
