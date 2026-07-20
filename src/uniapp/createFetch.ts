@@ -1,5 +1,5 @@
 import { merge } from '../.';
-import { createAsyncDedupe } from '../core';
+import { createAsyncDedupe, createEventEmitter } from '../core';
 
 /** 请求方法类型 */
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
@@ -41,6 +41,14 @@ interface ResponseResult<R, D> {
   cookies: string[];
   /** 请求配置信息 */
   requestConfig: R;
+}
+
+/** 请求中止错误类 */
+class CancelError extends Error {
+  constructor(key: string) {
+    super(`Request "${key}" was cancelled`);
+    this.name = 'CancelError';
+  }
 }
 
 /**
@@ -143,7 +151,7 @@ function createInterceptorManager<C>() {
  *   - `put(config)` - 发送 PUT 请求
  *   - `delete(config)` - 发送 DELETE 请求
  *   - `interceptors` - 拦截器管理（request / response）
- *   - `getRequestTask(key)` - 通过 key 获取请求任务（用于取消请求）
+ *   - `abort(key)` - 通过请求 key 取消请求
  *
  * @example
  * ```ts
@@ -172,14 +180,13 @@ function createInterceptorManager<C>() {
  * });
  *
  * // 取消请求
- * const result = await fetch.request({ url: '/users', method: 'GET', key: 'user-list' });
- * const task = fetch.getRequestTask('user-list');
- * task?.abort();
+ * fetch.request({ url: '/users', method: 'GET', key: 'user-list' });
+ * fetch.abort('user-list');
  * ```
  */
 function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
   const { asyncDedupe } = createAsyncDedupe();
-  const requestTaskMap = new Map<string, UniApp.RequestTask>();
+  const eventEmitter = createEventEmitter();
 
   /** 原始请求配置类型，由 getOriginalRequestConfig 返回值推断 */
   type OriginalRequestConfig = ReturnType<typeof getOriginalRequestConfig>;
@@ -194,7 +201,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     url: string;
     /** 请求数据，POST/PUT 等方法时使用 */
     data?: any;
-    /** 请求 key，用于通过 getRequestTask 获取请求任务以取消请求 */
+    /** 请求 key，用于通过 abort(key) 取消请求 */
     key?: string;
   };
 
@@ -209,6 +216,14 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     response: createInterceptorManager<ResponseResult<FullRequestConfig, any>>(),
   };
 
+  const cancelable = <T>(asyncFunc: () => T | Promise<T>, key?: string) => new Promise<T>((resolve, reject) => {
+    const offEventEmitter = key ? eventEmitter.once(key, () => reject(new CancelError(key))) : () => {};
+    // 通过 Promise.resolve() 将 asyncFunc 推迟到微任务执行，确保 once 监听器在当前同步代码完成后才可能触发
+    Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => offEventEmitter());
+  });
+
+  const abort = (key: string) => eventEmitter.emit(key, void 0);
+
   /**
    * 发送实际请求，调用 uni.request 并处理响应
    *
@@ -216,10 +231,20 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
    * @param fullRequestConfig - 完整请求配置
    * @returns 响应结果 Promise
    */
-  const dispatchRequest = <D>(fullRequestConfig: FullRequestConfig) => new Promise<ResponseResult<FullRequestConfig, D>>((resolve) => {
+  const dispatchRequest = <D>(fullRequestConfig: FullRequestConfig) => new Promise<ResponseResult<FullRequestConfig, D>>((resolve, reject) => {
     const { host, url, method, header, timeout, data, key } = fullRequestConfig;
 
-    const requestTask = uni.request({
+    let requestTask: UniApp.RequestTask | undefined;
+
+    // 在调用 uni.request 前注册取消监听，确保 complete 同步回调时能正确清理
+    const offEventEmitter = key
+      ? eventEmitter.once(key, () => {
+          reject(new CancelError(key));
+          requestTask?.abort();
+        })
+      : () => {};
+
+    requestTask = uni.request({
       url: `${host}${url}`,
       method,
       header,
@@ -245,13 +270,9 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
           requestConfig: fullRequestConfig,
         });
 
-        // 请求完成，删除缓存的请求任务
-        key && requestTaskMap.delete(key);
+        offEventEmitter();
       },
     });
-
-    // 存储请求任务，用于取消请求
-    key && requestTaskMap.set(key, requestTask);
   });
 
   /**
@@ -267,9 +288,10 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     const requestInterceptorChain = interceptors.request.handlers;
     for (const { fulfilled: onFulfilled, rejected: onRejected } of requestInterceptorChain) {
       try {
-        fullRequestConfig = await onFulfilled(fullRequestConfig);
+        fullRequestConfig = await cancelable(() => onFulfilled(fullRequestConfig), config.key);
       }
       catch (error) {
+        if (error instanceof CancelError) return Promise.reject(error);
         return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
@@ -281,9 +303,10 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     const responseInterceptorChain = interceptors.response.handlers;
     for (const { fulfilled: onFulfilled, rejected: onRejected } of responseInterceptorChain) {
       try {
-        fullResponseResult = await onFulfilled(fullResponseResult);
+        fullResponseResult = await cancelable(() => onFulfilled(fullResponseResult), config.key);
       }
       catch (error) {
+        if (error instanceof CancelError) return Promise.reject(error);
         return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
@@ -307,8 +330,8 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   };
 
   return {
-    /** 通过请求 key 获取已存储的请求任务，可用于调用 abort() 取消请求 */
-    getRequestTask: (key: string) => requestTaskMap.get(key) ?? null,
+    /** 通过请求 key 取消请求 */
+    abort,
     /** 拦截器管理器，包含 request（请求拦截）和 response（响应拦截） */
     interceptors,
     /** 发送请求，method 由请求配置决定 */
@@ -332,6 +355,6 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   };
 }
 
-export { type BaseRequestConfig, createFetch };
+export { type BaseRequestConfig, CancelError, createFetch };
 
 export default createFetch;
