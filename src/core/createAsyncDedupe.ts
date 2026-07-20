@@ -4,6 +4,14 @@ interface AsyncDedupeEvents {
   [key: string]: { fulfilled: unknown } | { rejected: unknown };
 }
 
+/** 取消执行错误类 */
+class CancelError extends Error {
+  constructor(key: string) {
+    super(`${key} async call canceled`);
+    this.name = 'CancelError';
+  }
+}
+
 /**
  * 创建一个异步去重实例，确保同一 key 的异步操作只执行一次，所有调用共享同一结果。
  *
@@ -53,7 +61,7 @@ function createAsyncDedupe() {
     Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => eventEmitter.delete(getCancelCallKey(key)));
   });
 
-  const cancelCall = (key: string) => eventEmitter.emit(getCancelCallKey(key), { rejected: new Error(`${key} async call canceled`) });
+  const cancelCall = (key: string) => eventEmitter.emit(getCancelCallKey(key), { rejected: new CancelError(key) });
 
   /**
    * 去重执行异步函数
@@ -84,6 +92,6 @@ function createAsyncDedupe() {
   return { asyncDedupe, cancelCall };
 }
 
-export { createAsyncDedupe };
+export { CancelError, createAsyncDedupe };
 
 export default createAsyncDedupe;
