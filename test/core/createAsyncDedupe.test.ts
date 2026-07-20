@@ -1,5 +1,5 @@
-import { createAsyncDedupe } from '@purea/utils';
 import { describe, expect, it, vi } from 'vitest';
+import { createAsyncDedupe, DedupeCancelError } from '@purea/utils';
 
 describe('createAsyncDedupe', () => {
   const { asyncDedupe: dedupe } = createAsyncDedupe();
@@ -573,7 +573,7 @@ describe('createAsyncDedupe', () => {
   });
 
   describe('cancelCall 功能', () => {
-    it('cancelCall 应该拒绝进行中的去重调用', async () => {
+    it('cancelCall 应该拒绝进行中的去重调用（使用 DedupeCancelError）', async () => {
       const { asyncDedupe, cancelCall } = createAsyncDedupe();
       let resolveLater!: (value: string) => void;
       const pendingPromise = new Promise<string>(resolve => { resolveLater = resolve; });
@@ -586,6 +586,7 @@ describe('createAsyncDedupe', () => {
       resolveLater('resolved');
 
       await expect(promise).rejects.toThrow('cancel-key async call canceled');
+      await expect(promise).rejects.toBeInstanceOf(DedupeCancelError);
       expect(func).toHaveBeenCalledTimes(1);
     });
 
@@ -600,7 +601,8 @@ describe('createAsyncDedupe', () => {
       await new Promise<void>(r => queueMicrotask(r));
       cancelCall('retry-key');
       resolveLater('resolved');
-      await expect(p1).rejects.toThrow();
+      await expect(p1).rejects.toBeInstanceOf(DedupeCancelError);
+      await expect(p1).rejects.toThrow('retry-key async call canceled');
       expect(func1).toHaveBeenCalledTimes(1);
 
       const p2 = await asyncDedupe('retry-key', func2);
@@ -621,7 +623,8 @@ describe('createAsyncDedupe', () => {
       await new Promise<void>(r => queueMicrotask(r));
       cancelCall('key-a');
       resolveA('resolved');
-      await expect(pA).rejects.toThrow();
+      await expect(pA).rejects.toBeInstanceOf(DedupeCancelError);
+      await expect(pA).rejects.toThrow('key-a async call canceled');
 
       const resultB = await pB;
       expect(resultB).toBe('result-b');
@@ -631,6 +634,25 @@ describe('createAsyncDedupe', () => {
       const { cancelCall } = createAsyncDedupe();
 
       expect(() => cancelCall('nonexistent-key')).not.toThrow();
+    });
+  });
+
+  describe('cancelError 类', () => {
+    it('应该正确导出 DedupeCancelError', () => {
+      expect(DedupeCancelError).toBeDefined();
+      expect(typeof DedupeCancelError).toBe('function');
+    });
+
+    it('应该是 Error 的子类', () => {
+      const err = new DedupeCancelError('test');
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toBeInstanceOf(DedupeCancelError);
+    });
+
+    it('应该设置正确的 name 和 message', () => {
+      const err = new DedupeCancelError('my-key');
+      expect(err.name).toBe('DedupeCancelError');
+      expect(err.message).toBe('my-key async call canceled');
     });
   });
 });

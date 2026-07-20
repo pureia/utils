@@ -5,10 +5,10 @@ interface AsyncDedupeEvents {
 }
 
 /** 取消执行错误类 */
-class CancelError extends Error {
+class DedupeCancelError extends Error {
   constructor(key: string) {
     super(`${key} async call canceled`);
-    this.name = 'CancelError';
+    this.name = 'DedupeCancelError';
   }
 }
 
@@ -61,7 +61,7 @@ function createAsyncDedupe() {
     Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => eventEmitter.delete(getCancelCallKey(key)));
   });
 
-  const cancelCall = (key: string) => eventEmitter.emit(getCancelCallKey(key), { rejected: new CancelError(key) });
+  const cancelCall = (key: string) => eventEmitter.emit(getCancelCallKey(key), { rejected: new DedupeCancelError(key) });
 
   /**
    * 去重执行异步函数
@@ -92,6 +92,6 @@ function createAsyncDedupe() {
   return { asyncDedupe, cancelCall };
 }
 
-export { CancelError, createAsyncDedupe };
+export { createAsyncDedupe, DedupeCancelError };
 
 export default createAsyncDedupe;
