@@ -1,5 +1,5 @@
 import { merge } from '../.';
-import { createAsyncDedupe, createEventEmitter } from '../core';
+import { createAsyncDedupe, createEventEmitter, stableStringify } from '../core';
 
 /** 请求方法类型 */
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
@@ -44,24 +44,11 @@ interface ResponseResult<R, D> {
 }
 
 /** 请求中止错误类 */
-class CancelError extends Error {
+class RequestCancelError extends Error {
   constructor(key: string) {
     super(`Request "${key}" was cancelled`);
-    this.name = 'CancelError';
+    this.name = 'RequestCancelError';
   }
-}
-
-/**
- * 稳定字符串化函数，对对象按键排序后序列化，确保相同内容的对象产生相同的字符串
- * @param obj - 要序列化的值
- * @returns 稳定的 JSON 字符串
- */
-function stableStringify(obj: any): string {
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
-  if (Array.isArray(obj)) return `[${obj.map(stableStringify).join(',')}]`;
-  const sortedKeys = Object.keys(obj).sort();
-  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${stableStringify(obj[key])}`);
-  return `{${pairs.join(',')}}`;
 }
 
 /**
@@ -111,7 +98,7 @@ function getStatusCodeMsg(code: number, defaultMsg?: string) {
 interface Interceptor<C> {
   /** 成功处理函数，接收数据并返回处理后的数据（支持异步） */
   fulfilled: (config: C) => C | Promise<C>;
-  /** 错误处理函数，接收错误并返回错误（truthy 返回值会替代原始错误） */
+  /** 错误处理函数，接收错误并返回错误（非 null/undefined 返回值会替代原始错误） */
   rejected?: <E>(error: E) => E;
 }
 
@@ -217,7 +204,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   };
 
   const cancelable = <T>(asyncFunc: () => T | Promise<T>, key?: string) => new Promise<T>((resolve, reject) => {
-    const offEventEmitter = key ? eventEmitter.once(key, () => reject(new CancelError(key))) : () => {};
+    const offEventEmitter = key ? eventEmitter.once(key, () => reject(new RequestCancelError(key))) : () => {};
     // 通过 Promise.resolve() 将 asyncFunc 推迟到微任务执行，确保 once 监听器在当前同步代码完成后才可能触发
     Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => offEventEmitter());
   });
@@ -239,7 +226,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     // 在调用 uni.request 前注册取消监听，确保 complete 同步回调时能正确清理
     const offEventEmitter = key
       ? eventEmitter.once(key, () => {
-          reject(new CancelError(key));
+          reject(new RequestCancelError(key));
           requestTask?.abort();
         })
       : () => {};
@@ -291,7 +278,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
         fullRequestConfig = await cancelable(() => onFulfilled(fullRequestConfig), config.key);
       }
       catch (error) {
-        if (error instanceof CancelError) return Promise.reject(error);
+        if (error instanceof RequestCancelError) return Promise.reject(error);
         return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
@@ -306,7 +293,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
         fullResponseResult = await cancelable(() => onFulfilled(fullResponseResult), config.key);
       }
       catch (error) {
-        if (error instanceof CancelError) return Promise.reject(error);
+        if (error instanceof RequestCancelError) return Promise.reject(error);
         return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
@@ -326,7 +313,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   const request = <D = any>(requestConfig: RequestConfig) => {
     const fullRequestConfig = merge({ rawRequestConfig: requestConfig }, getOriginalRequestConfig(), requestConfig);
     if (!fullRequestConfig.isDedup) return core<D>(fullRequestConfig);
-    return asyncDedupe(`Request:${simpleHash(stableStringify(requestConfig))}`, () => core<D>(fullRequestConfig));
+    return asyncDedupe(`Request:${simpleHash(stableStringify(fullRequestConfig)!)}`, () => core<D>(fullRequestConfig));
   };
 
   return {
@@ -355,6 +342,6 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   };
 }
 
-export { type BaseRequestConfig, CancelError, createFetch };
+export { type BaseRequestConfig, createFetch, RequestCancelError };
 
 export default createFetch;
