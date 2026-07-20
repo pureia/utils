@@ -4,6 +4,5 @@ export default defineConfig({
   entry: 'src/**/*.ts',
   dts: true,
   clean: true,
-  minify: true,
   unbundle: true,
 });

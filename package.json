@@ -15,7 +15,8 @@
     "./core/createEventEmitter": "./dist/core/createEventEmitter.mjs",
     "./core/stableStringify": "./dist/core/stableStringify.mjs",
     "./uniapp": "./dist/uniapp/index.mjs",
-    "./uniapp/createFetch": "./dist/uniapp/createFetch.mjs"
+    "./uniapp/createFetch": "./dist/uniapp/createFetch.mjs",
+    "./lodash": "./dist/third-party/lodash.mjs"
   },
   "types": "./dist/index.d.mts",
   "files": [

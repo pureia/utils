@@ -1,4 +1,4 @@
-import { merge } from '../.';
+import { merge } from '../third-party/lodash';
 import { createAsyncDedupe, createEventEmitter, stableStringify } from '../core';
 
 /** 请求方法类型 */

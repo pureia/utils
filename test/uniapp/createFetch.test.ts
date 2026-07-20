@@ -1,6 +1,7 @@
 import type { BaseRequestConfig } from '@purea/utils';
+import { merge } from '@purea/utils/lodash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFetch as _createFetch, RequestCancelError, merge } from '@purea/utils';
+import { createFetch as _createFetch, RequestCancelError } from '@purea/utils';
 
 const mockUniRequest = vi.fn();
 
