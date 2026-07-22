@@ -1,15 +1,8 @@
 import createEventEmitter from './createEventEmitter';
+import { CancelError, createCancelable } from './createCancelable';
 
 interface AsyncDedupeEvents {
   [key: string]: { fulfilled: unknown } | { rejected: unknown };
-}
-
-/** 取消执行错误类 */
-class DedupeCancelError extends Error {
-  constructor(key: string) {
-    super(`${key} async call canceled`);
-    this.name = 'DedupeCancelError';
-  }
 }
 
 /**
@@ -19,7 +12,7 @@ class DedupeCancelError extends Error {
  * 其余调用会等待并共享第一次调用的结果（无论是成功还是失败）。
  * 前一次请求完成后，相同 key 的新请求会重新执行。
  *
- * 内部基于 `createEventEmitter` 实现事件的发布/订阅，利用微任务调度异步函数的执行。
+ * 内部基于 `createCancelable` 实现可取消的异步执行，基于 `createEventEmitter` 实现结果的事件发布/订阅。
  *
  * @returns 返回 `{ asyncDedupe, cancelCall }`，其中 `asyncDedupe` 是去重执行函数，`cancelCall` 是取消进行中调用的函数
  *
@@ -37,31 +30,24 @@ class DedupeCancelError extends Error {
  * // 取消进行中的调用
  * cancelCall('user-1');
  *
+ * // 捕获取消错误
+ * try {
+ *   await asyncDedupe('user-1', () => fetchUser(1));
+ * } catch (error) {
+ *   if (error instanceof CancelError) {
+ *     // 用户主动取消，忽略
+ *     return;
+ *   }
+ *   throw error;
+ * }
+ *
  * // 请求完成后，相同 key 的新请求会重新执行
  * const r3 = await asyncDedupe('user-1', () => fetchUser(1)); // 重新执行
  * ```
  */
 function createAsyncDedupe() {
   const eventEmitter = createEventEmitter<AsyncDedupeEvents>();
-
-  const getCancelCallKey = (key: string) => `${String(key)}-cancel-call`;
-
-  /**
-   * 执行异步函数，处理取消事件
-   *
-   * @typeParam V - 异步函数的返回值类型
-   * @param key - 唯一标识符，相同 key 的请求会被合并
-   * @param asyncFunc - 要执行的异步函数
-   * @returns 返回一个 Promise，解析为异步函数的结果
-   */
-  const execute = <V>(key: string, asyncFunc: () => Promise<V>) => new Promise<V>((resolve, reject) => {
-    // 监听取消事件，拒绝 Promise
-    eventEmitter.once(getCancelCallKey(key), result => reject((result as { rejected: Error }).rejected));
-
-    Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => eventEmitter.delete(getCancelCallKey(key)));
-  });
-
-  const cancelCall = (key: string) => eventEmitter.emit(getCancelCallKey(key), { rejected: new DedupeCancelError(key) });
+  const { cancelable, cancel } = createCancelable();
 
   /**
    * 去重执行异步函数
@@ -77,7 +63,7 @@ function createAsyncDedupe() {
    */
   function asyncDedupe<V>(key: string, asyncFunc: () => Promise<V>): Promise<V> {
     // 如果事件已存在，说明已有相同 key 的请求在进行中，不再重复执行
-    !eventEmitter.has(key) && execute(key, asyncFunc).then(result => {
+    !eventEmitter.has(key) && cancelable(key, asyncFunc).then(result => {
       eventEmitter.emit(key, { fulfilled: result });
     }).catch(error => {
       eventEmitter.emit(key, { rejected: error });
@@ -89,9 +75,9 @@ function createAsyncDedupe() {
     });
   };
 
-  return { asyncDedupe, cancelCall };
+  return { asyncDedupe, cancelCall: cancel };
 }
 
-export { createAsyncDedupe, DedupeCancelError };
+export { createAsyncDedupe };
 
 export default createAsyncDedupe;

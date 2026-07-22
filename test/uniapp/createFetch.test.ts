@@ -1,7 +1,7 @@
 import type { BaseRequestConfig } from '@purea/utils';
 import { merge } from '@purea/utils/lodash';
+import { createFetch as _createFetch, CancelError } from '@purea/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFetch as _createFetch, RequestCancelError } from '@purea/utils';
 
 const mockUniRequest = vi.fn();
 
@@ -480,7 +480,7 @@ describe('createFetch', () => {
   });
 
   describe('请求取消 (abort)', () => {
-    it('abort(key) 应该拒绝请求并抛出 RequestCancelError，并调用底层 requestTask.abort()', async () => {
+    it('abort(key) 应该拒绝请求并抛出 CancelError，并调用底层 requestTask.abort()', async () => {
       const mockRequestTask = { abort: vi.fn() };
       mockUniRequest.mockReturnValue(mockRequestTask);
       // 不调用 complete，模拟请求进行中
@@ -490,8 +490,8 @@ describe('createFetch', () => {
 
       fetch.abort('cancel-test');
 
-      await expect(requestPromise).rejects.toBeInstanceOf(RequestCancelError);
-      await expect(requestPromise).rejects.toThrow('Request "cancel-test" was cancelled');
+      await expect(requestPromise).rejects.toBeInstanceOf(CancelError);
+      await expect(requestPromise).rejects.toThrow('cancel-test async call canceled');
       expect(mockRequestTask.abort).toHaveBeenCalled();
     });
 
@@ -516,21 +516,21 @@ describe('createFetch', () => {
 
       fetch.abort('req-1');
 
-      await expect(req1).rejects.toBeInstanceOf(RequestCancelError);
+      await expect(req1).rejects.toBeInstanceOf(CancelError);
       // req-2 不应被取消
       expect(mockRequestTask.abort).toHaveBeenCalledTimes(1);
     });
 
     it('cancelError 应该具有正确的 name 属性', () => {
-      const error = new RequestCancelError('test-key');
-      expect(error.name).toBe('RequestCancelError');
-      expect(error.message).toBe('Request "test-key" was cancelled');
+      const error = new CancelError('test-key');
+      expect(error.name).toBe('CancelError');
+      expect(error.message).toBe('test-key async call canceled');
       expect(error).toBeInstanceOf(Error);
     });
   });
 
   describe('拦截器取消', () => {
-    it('请求拦截器期间 abort 应抛出 RequestCancelError', async () => {
+    it('请求拦截器期间 abort 应抛出 CancelError', async () => {
       mockUniRequest.mockReturnValue({ abort: vi.fn() });
 
       const fetch = createFetch();
@@ -545,12 +545,12 @@ describe('createFetch', () => {
       await new Promise(r => setTimeout(r, 0));
       fetch.abort('ix-cancel');
 
-      await expect(requestPromise).rejects.toBeInstanceOf(RequestCancelError);
+      await expect(requestPromise).rejects.toBeInstanceOf(CancelError);
       // 拦截器被取消后，不应到达 dispatchRequest
       expect(mockUniRequest).not.toHaveBeenCalled();
     });
 
-    it('响应拦截器期间 abort 应抛出 RequestCancelError', async () => {
+    it('响应拦截器期间 abort 应抛出 CancelError', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
         complete({ data: { id: 1 }, statusCode: 200, errMsg: 'ok' });
       });
@@ -566,7 +566,7 @@ describe('createFetch', () => {
       await new Promise(r => setTimeout(r, 0));
       fetch.abort('rx-cancel');
 
-      await expect(requestPromise).rejects.toBeInstanceOf(RequestCancelError);
+      await expect(requestPromise).rejects.toBeInstanceOf(CancelError);
     });
   });
 

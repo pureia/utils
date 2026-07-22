@@ -1,5 +1,5 @@
 import { merge } from '../third-party/lodash';
-import { createAsyncDedupe, createEventEmitter, stableStringify } from '../core';
+import { CancelError, createAsyncDedupe, createCancelable, stableStringify } from '../core';
 
 /** 请求方法类型 */
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
@@ -41,14 +41,6 @@ interface ResponseResult<R, D> {
   cookies: string[];
   /** 请求配置信息 */
   requestConfig: R;
-}
-
-/** 请求中止错误类 */
-class RequestCancelError extends Error {
-  constructor(key: string) {
-    super(`Request "${key}" was cancelled`);
-    this.name = 'RequestCancelError';
-  }
 }
 
 /**
@@ -169,11 +161,23 @@ function createInterceptorManager<C>() {
  * // 取消请求
  * fetch.request({ url: '/users', method: 'GET', key: 'user-list' });
  * fetch.abort('user-list');
+ *
+ * // 捕获取消错误
+ * try {
+ *   await fetch.request({ url: '/users', method: 'GET', key: 'user-list' });
+ * } catch (error) {
+ *   if (error instanceof CancelError) {
+ *     // 用户主动取消，忽略
+ *     return;
+ *   }
+ *   // 真正的错误处理
+ *   console.error(error);
+ * }
  * ```
  */
 function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
   const { asyncDedupe } = createAsyncDedupe();
-  const eventEmitter = createEventEmitter();
+  const { cancelable, cancel } = createCancelable();
 
   /** 原始请求配置类型，由 getOriginalRequestConfig 返回值推断 */
   type OriginalRequestConfig = ReturnType<typeof getOriginalRequestConfig>;
@@ -203,13 +207,13 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     response: createInterceptorManager<ResponseResult<FullRequestConfig, any>>(),
   };
 
-  const cancelable = <T>(asyncFunc: () => T | Promise<T>, key?: string) => new Promise<T>((resolve, reject) => {
-    const offEventEmitter = key ? eventEmitter.once(key, () => reject(new RequestCancelError(key))) : () => {};
-    // 通过 Promise.resolve() 将 asyncFunc 推迟到微任务执行，确保 once 监听器在当前同步代码完成后才可能触发
-    Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => offEventEmitter());
-  });
-
-  const abort = (key: string) => eventEmitter.emit(key, void 0);
+  /**
+   * 以可取消的方式执行拦截器处理函数
+   * @param key - 请求 key
+   * @param fn - 拦截器处理函数
+   * @returns 处理后的结果
+   */
+  const runInterceptor = <T>(key: string | undefined, fn: () => T | Promise<T>) => key ? cancelable(key, fn) : fn();
 
   /**
    * 发送实际请求，调用 uni.request 并处理响应
@@ -218,49 +222,45 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
    * @param fullRequestConfig - 完整请求配置
    * @returns 响应结果 Promise
    */
-  const dispatchRequest = <D>(fullRequestConfig: FullRequestConfig) => new Promise<ResponseResult<FullRequestConfig, D>>((resolve, reject) => {
+  const dispatchRequest = <D>(fullRequestConfig: FullRequestConfig) => {
     const { host, url, method, header, timeout, data, key } = fullRequestConfig;
 
     let requestTask: UniApp.RequestTask | undefined;
 
-    // 在调用 uni.request 前注册取消监听，确保 complete 同步回调时能正确清理
-    const offEventEmitter = key
-      ? eventEmitter.once(key, () => {
-          reject(new RequestCancelError(key));
-          requestTask?.abort();
-        })
-      : () => {};
+    // responsePromise 只负责将 uni.request 的 complete 回调桥接为 Promise；
+    // 取消逻辑完全由外层 cancelable 处理，因此不需要 reject 参数。
+    const responsePromise = new Promise<ResponseResult<FullRequestConfig, D>>((resolve) => {
+      requestTask = uni.request({
+        url: `${host}${url}`,
+        method,
+        header,
+        timeout,
+        data,
+        complete(result) {
+          const {
+            data: respData,
+            header: respHeader,
+            cookies,
+            errMsg: msg,
+            statusCode: code,
+          } = result as UniApp.GeneralCallbackResult & UniApp.RequestSuccessCallbackResult;
 
-    requestTask = uni.request({
-      url: `${host}${url}`,
-      method,
-      header,
-      timeout,
-      data,
-      complete(result) {
-        const {
-          data,
-          header,
-          cookies,
-          errMsg: msg,
-          statusCode: code,
-        } = result as UniApp.GeneralCallbackResult & UniApp.RequestSuccessCallbackResult;
+          const statusCode = getStatusCode(code, msg);
 
-        const statusCode = getStatusCode(code, msg);
-
-        resolve({
-          code: statusCode,
-          msg: getStatusCodeMsg(statusCode, msg),
-          data: data as D,
-          header: header ?? {},
-          cookies: cookies ?? [],
-          requestConfig: fullRequestConfig,
-        });
-
-        offEventEmitter();
-      },
+          resolve({
+            code: statusCode,
+            msg: getStatusCodeMsg(statusCode, msg),
+            data: respData as D,
+            header: respHeader ?? {},
+            cookies: cookies ?? [],
+            requestConfig: fullRequestConfig,
+          });
+        },
+      });
     });
-  });
+
+    return key ? cancelable(key, () => responsePromise, () => requestTask?.abort()) : responsePromise;
+  };
 
   /**
    * 核心请求流程：依次执行请求拦截器 → 发送请求 → 依次执行响应拦截器
@@ -275,10 +275,10 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     const requestInterceptorChain = interceptors.request.handlers;
     for (const { fulfilled: onFulfilled, rejected: onRejected } of requestInterceptorChain) {
       try {
-        fullRequestConfig = await cancelable(() => onFulfilled(fullRequestConfig), config.key);
+        fullRequestConfig = await runInterceptor(config.key, () => onFulfilled(fullRequestConfig));
       }
       catch (error) {
-        if (error instanceof RequestCancelError) return Promise.reject(error);
+        if (error instanceof CancelError) return Promise.reject(error);
         return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
@@ -290,10 +290,10 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     const responseInterceptorChain = interceptors.response.handlers;
     for (const { fulfilled: onFulfilled, rejected: onRejected } of responseInterceptorChain) {
       try {
-        fullResponseResult = await cancelable(() => onFulfilled(fullResponseResult), config.key);
+        fullResponseResult = await runInterceptor(config.key, () => onFulfilled(fullResponseResult));
       }
       catch (error) {
-        if (error instanceof RequestCancelError) return Promise.reject(error);
+        if (error instanceof CancelError) return Promise.reject(error);
         return Promise.reject(onRejected ? await onRejected(error) ?? error : error);
       }
     }
@@ -318,7 +318,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
 
   return {
     /** 通过请求 key 取消请求 */
-    abort,
+    abort: cancel,
     /** 拦截器管理器，包含 request（请求拦截）和 response（响应拦截） */
     interceptors,
     /** 发送请求，method 由请求配置决定 */
@@ -342,6 +342,6 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   };
 }
 
-export { type BaseRequestConfig, createFetch, RequestCancelError };
+export { type BaseRequestConfig, CancelError, createFetch };
 
 export default createFetch;
