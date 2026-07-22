@@ -1,5 +1,5 @@
 import createEventEmitter from './createEventEmitter';
-import { CancelError, createCancelable } from './createCancelable';
+import { createCancelable } from './createCancelable';
 
 interface AsyncDedupeEvents {
   [key: string]: { fulfilled: unknown } | { rejected: unknown };

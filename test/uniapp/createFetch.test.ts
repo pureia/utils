@@ -512,13 +512,15 @@ describe('createFetch', () => {
 
       const fetch = createFetch();
       const req1 = fetch.request({ url: '/users/1', method: 'GET', key: 'req-1' });
-      const req2 = fetch.request({ url: '/users/2', method: 'GET', key: 'req-2' });
+      fetch.request({ url: '/users/2', method: 'GET', key: 'req-2' });
 
       fetch.abort('req-1');
 
       await expect(req1).rejects.toBeInstanceOf(CancelError);
       // req-2 不应被取消
       expect(mockRequestTask.abort).toHaveBeenCalledTimes(1);
+      // 两个请求都已被发起
+      expect(mockUniRequest).toHaveBeenCalledTimes(2);
     });
 
     it('cancelError 应该具有正确的 name 属性', () => {
