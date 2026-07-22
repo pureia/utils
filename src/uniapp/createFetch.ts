@@ -55,7 +55,7 @@ function simpleHash(str: string): string {
     h1 = Math.imul(h1 ^ ch, 2654435761);
     h2 = Math.imul(h2 ^ ch, 1597334677);
   }
-  return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
+  return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
 }
 
 /**
