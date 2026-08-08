@@ -26,6 +26,7 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "test": "vitest run",
+    "lint": "eslint --fix .",
     "test:watch": "vitest"
   },
   "dependencies": {
