@@ -1,7 +1,7 @@
 import type { BaseRequestConfig } from '@purea/utils';
 import { merge } from '@purea/utils/lodash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFetch as _createFetch, CancelError, FetchCode } from '@purea/utils';
+import { buildFullConfig, createFetch as _createFetch, CancelError, FetchCode } from '@purea/utils';
 
 const mockUniRequest = vi.fn();
 
@@ -793,6 +793,31 @@ describe('createFetch', () => {
         const result = await requestPromise;
         expect(result.ok).toBe(true);
       });
+    });
+  });
+
+  describe('buildFullConfig', () => {
+    const defaults = {
+      host: 'https://api.example.com',
+      method: 'GET' as const,
+      header: { 'Content-Type': 'application/json' },
+      timeout: 10000,
+      isDedup: false,
+    };
+
+    it('header 应按字段深合并（叠加）', () => {
+      const config = buildFullConfig(defaults, { url: '/users', header: { 'X-Extra': 'value' } });
+
+      expect(config.header).toEqual({ 'Content-Type': 'application/json', 'X-Extra': 'value' });
+      expect(config.host).toBe('https://api.example.com');
+    });
+
+    it('请求配置字段应整体覆盖默认配置', () => {
+      const config = buildFullConfig(defaults, { url: '/users', method: 'POST' as const, timeout: 5000 });
+
+      expect(config.method).toBe('POST');
+      expect(config.timeout).toBe(5000);
+      expect(config.rawRequestConfig).toEqual({ url: '/users', method: 'POST', timeout: 5000 });
     });
   });
 });

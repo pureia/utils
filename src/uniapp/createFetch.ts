@@ -87,6 +87,40 @@ function isResponseResultLike(value: unknown): boolean {
 }
 
 /**
+ * 合并默认配置与请求配置为完整请求配置
+ *
+ * 合并规则：`header` 按字段深合并（叠加）；其余字段请求配置提供即整体替换
+ * （数组按引用替换，不做索引合并）；`rawRequestConfig` 保留请求配置原始引用。
+ * 本函数为纯同步合并，同步抛错（如属性 getter）由调用方 try/catch 兜底。
+ *
+ * @typeParam R - 默认配置类型，需继承 `BaseRequestConfig`
+ * @typeParam RC - 请求配置类型（默认配置的部分覆盖 + url/data/key 扩展）
+ * @param defaults - 默认配置
+ * @param requestConfig - 请求配置（url 为必填）
+ * @returns 完整请求配置（请求配置覆盖字段整体替换；header 深合并）
+ */
+export function buildFullConfig<
+  R extends BaseRequestConfig,
+  RC extends Omit<Partial<R>, 'method' | 'header'> & {
+    url: string;
+    data?: unknown;
+    key?: string;
+    method?: FetchMethod;
+    header?: Record<string, string>;
+  }
+>(defaults: R, requestConfig: RC): Omit<R, keyof RC> & RC & { readonly rawRequestConfig: RC; header: Record<string, string> } {
+  // 合并对象在运行时字段齐全（defaults 补齐 RC 缺省的必填字段），
+  // 但类型层面 spread 会把重叠字段推断为"可缺省"（如 method: FetchMethod | undefined），
+  // 无法静态满足目标类型，故保留此运行时为真的断言。
+  return {
+    ...defaults,
+    ...requestConfig,
+    rawRequestConfig: requestConfig,
+    header: { ...defaults.header, ...requestConfig.header },
+  } as Omit<R, keyof RC> & RC & { readonly rawRequestConfig: RC; header: Record<string, string> };
+}
+
+/**
  * 获取错误的描述文本
  *
  * 优先取 `Error.message` / 字符串本身；抛出对象时提取 `message`/`msg` 字段
@@ -481,10 +515,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   };
 
   /**
-   * 发送请求，自动合并默认配置和请求配置
-   *
-   * 合并规则：`header` 按字段深合并（叠加）；其余字段请求配置提供即整体替换
-   * （数组按引用替换，不做 lodash 的索引合并），`rawRequestConfig` 保留请求配置原始引用。
+   * 发送请求，自动合并默认配置和请求配置（合并规则见 `buildFullConfig`）
    *
    * 同步兜底：配置合并与去重 hash 计算可能同步抛错（如 `data` 含循环引用时
    * `stableStringify` 抛 TypeError），统一归一化为 `code: -4` 失败结果，保持"永不 reject 且
@@ -500,16 +531,9 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   const request = <D = any>(requestConfig: RequestConfig): Promise<ResponseResult<FullRequestConfig, D>> => {
     let fullRequestConfig: FullRequestConfig;
     try {
-      const defaults = getOriginalRequestConfig();
-      // 合并对象在运行时字段齐全（defaults 补齐 RequestConfig 的全部缺省字段），
-      // 但类型层面 spread 会把重叠字段推断为"可缺省"（如 method: FetchMethod | undefined），
-      // 无法静态满足 FullRequestConfig，故保留此运行时为真的断言。
-      fullRequestConfig = {
-        ...defaults,
-        ...requestConfig,
-        rawRequestConfig: requestConfig,
-        header: { ...defaults.header, ...requestConfig.header },
-      } as FullRequestConfig;
+      // 请求配置类型为全可选覆盖，类型层面无法静态满足 FullRequestConfig（如 method 可能缺省），
+      // 运行时由 defaults 补齐，此处断言为真（buildFullConfig 返回值对"必填型 RC"调用方更精确）
+      fullRequestConfig = buildFullConfig(getOriginalRequestConfig(), requestConfig) as FullRequestConfig;
     }
     catch (error) {
       // 合并阶段同步异常：归一化为失败结果（请求配置字段尽力保留）。
