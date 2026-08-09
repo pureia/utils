@@ -5,7 +5,7 @@
 ## 请求域（uni-app fetch）
 
 - **错误归一化（error normalization）**：请求库的核心承诺——任何请求都不会 reject，一切结果（成功或失败）都以统一响应结果返回，调用方通过 `code` 判断成败，无需 try/catch。
-- **统一响应结果（unified response result）**：`{ ok, code, msg, data, header, cookies, requestConfig, error? }` 的统一结构（类型 `ResponseResult`），是所有请求路径（成功、传输错误、HTTP 错误、业务错误、取消）的共同出口；`data` 类型恒为 `D | null`，`ok` 不自动收窄。
+- **统一响应结果（unified response result）**：`{ ok, code, msg, data, header, cookies, requestConfig, error? }` 的统一结构（类型 `ResponseResult`），是所有请求路径（成功、传输错误、HTTP 错误、业务错误、取消）的共同出口；`data` 类型恒为 `D | null`，`ok` 不自动收窄，需要时由调用方按 `ok` 自行断言。省略请求泛型时 `D` 默认 `unknown`；响应拦截器内读取到的 `data` 恒为 `unknown`，同样需自行收窄（见 ADR 0016）。
 - **code（状态码）**：结果中判断成败的依据。语义约定：成功状态码可配置（`successStatusCodes`，默认 `[200]`）；负数哨兵码表示非 HTTP 的传输/流程错误；其余 HTTP 码（4xx/5xx 等）表示 HTTP 错误。取值空间完整——无有效 HTTP 状态（`statusCode` 为 `0`/`null`/`undefined`）且非中止/超时时归一为 `-3`。
 - **msg（状态码描述）**：结果的描述文本。有 HTTP 状态码（含成功与失败）时使用映射表描述（如 `500 → 'Internal Server Error'`），未收录码（含后端自定义码）回退 `HTTP ${code}`；不透传 uni 的 `errMsg`（其描述传输层，HTTP 500 时恒为 `"request:ok"` 会误导）；哨兵码使用固定描述（中止/超时）或原始 `errMsg`（未知错误）。
 - **ok（成败字段）**：统一响应结果的成败依据，`true` 为成功响应（code 在配置的成功状态码内，默认 `[200]`），`false` 为失败响应（HTTP 错误或哨兵码）；为普通 boolean，类型上不自动收窄 `data`/`error`，需要时由调用方按 `ok` 自行断言。

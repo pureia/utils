@@ -376,7 +376,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
 
   const interceptors = {
     request: createInterceptorManager<FullRequestConfig>(),
-    response: createInterceptorManager<ResponseResult<FullRequestConfig, any>>(),
+    response: createInterceptorManager<ResponseResult<FullRequestConfig, unknown>>(),
   };
 
   /**
@@ -479,9 +479,11 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
     let fullRequestConfig = config;
     // key 唯一性告警：另一进行中的请求已占用该 key，abort(key) 将同时取消它们
     fullRequestConfig.key && isPending(fullRequestConfig.key) && console.warn(`[createFetch] key "${fullRequestConfig.key}" 已被其他进行中的请求占用，abort(key) 会同时取消所有同 key 请求，请保证并发请求间 key 唯一`);
-    // 请求拦截处理
-    // 链快照：进行中的请求只执行发起时刻已注册的拦截器，避免执行期间新增的拦截器污染本次请求
+    // 拦截器链快照：进入 core 时对请求/响应链一次快照（见 ADR 0004 §2），
+    // 进行中的请求只执行发起时刻已注册的拦截器，执行期间新注册的只影响后续请求
     const requestInterceptorChain = [...interceptors.request.handlers];
+    const responseInterceptorChain = [...interceptors.response.handlers];
+    // 请求拦截处理
     for (const onFulfilled of requestInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullRequestConfig));
@@ -511,8 +513,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
       return normalizeError<D>(error, undefined, fullRequestConfig);
     }
 
-    // 响应拦截处理（链快照与取消 key 理由同请求拦截）
-    const responseInterceptorChain = [...interceptors.response.handlers];
+    // 响应拦截处理
     for (const onFulfilled of responseInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullResponseResult));
@@ -522,7 +523,9 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
           console.warn('[createFetch] 响应拦截器必须返回 ResponseResult（含 ok/code 字段），非法返回值已被忽略');
         }
         else {
-          fullResponseResult = interceptorResult;
+          // 边界断言：返回值已通过 isResponseResultLike 运行时形状校验（ok/code），
+          // data 类型由拦截器决定（unknown 需自行收窄），收窄到当前请求泛型 D 为边界职责
+          fullResponseResult = interceptorResult as ResponseResult<FullRequestConfig, D>;
         }
       }
       catch (error) {
@@ -548,7 +551,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
    * @param requestConfig - 请求配置（url 为必填）
    * @returns 响应结果 Promise
    */
-  const request = <D = any>(requestConfig: RequestConfig): Promise<ResponseResult<FullRequestConfig, D>> => {
+  const request = <D = unknown>(requestConfig: RequestConfig): Promise<ResponseResult<FullRequestConfig, D>> => {
     let fullRequestConfig: FullRequestConfig;
     try {
       // 请求配置类型为全可选覆盖，类型层面无法静态满足 FullRequestConfig（如 method 可能缺省），
@@ -606,7 +609,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'GET'）
      * @returns 响应结果 Promise
      */
-    get<D = any>(requestConfig: ShortcutRequestConfig) {
+    get<D = unknown>(requestConfig: ShortcutRequestConfig) {
       // 泛型 R 下 Omit<Partial<R>, 'method'> 无法静态满足 Partial<R>（TS2345），需断言
       return request<D>({ ...requestConfig, method: 'GET' } as RequestConfig);
     },
@@ -616,7 +619,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'POST'）
      * @returns 响应结果 Promise
      */
-    post<D = any>(requestConfig: ShortcutRequestConfig) {
+    post<D = unknown>(requestConfig: ShortcutRequestConfig) {
       return request<D>({ ...requestConfig, method: 'POST' } as RequestConfig);
     },
     /**
@@ -625,7 +628,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'PUT'）
      * @returns 响应结果 Promise
      */
-    put<D = any>(requestConfig: ShortcutRequestConfig) {
+    put<D = unknown>(requestConfig: ShortcutRequestConfig) {
       return request<D>({ ...requestConfig, method: 'PUT' } as RequestConfig);
     },
     /**
@@ -634,7 +637,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'DELETE'）
      * @returns 响应结果 Promise
      */
-    delete<D = any>(requestConfig: ShortcutRequestConfig) {
+    delete<D = unknown>(requestConfig: ShortcutRequestConfig) {
       return request<D>({ ...requestConfig, method: 'DELETE' } as RequestConfig);
     },
   };

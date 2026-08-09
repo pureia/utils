@@ -1,7 +1,7 @@
 import type { BaseRequestConfig } from '@purea/utils';
 import { merge } from '@purea/utils/lodash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildFullConfig, createFetch as _createFetch, CancelError, FetchCode } from '@purea/utils';
+import { createFetch as _createFetch, buildFullConfig, CancelError, FetchCode } from '@purea/utils';
 
 const mockUniRequest = vi.fn();
 
@@ -278,7 +278,8 @@ describe('createFetch', () => {
 
       const fetch = createFetch();
       fetch.interceptors.response.use((response) => {
-        response.data = { ...response.data, processed: true };
+        // data 类型为 unknown（见 ADR 0012/0016），拦截器读取需自行收窄
+        response.data = { ...(response.data ?? {}) as Record<string, unknown>, processed: true };
         return response;
       });
 
@@ -292,11 +293,11 @@ describe('createFetch', () => {
 
       const fetch = createFetch();
       fetch.interceptors.response.use((response) => {
-        response.data = { ...response.data, step1: true };
+        response.data = { ...(response.data ?? {}) as Record<string, unknown>, step1: true };
         return response;
       });
       fetch.interceptors.response.use((response) => {
-        response.data = { ...response.data, step2: true };
+        response.data = { ...(response.data ?? {}) as Record<string, unknown>, step2: true };
         return response;
       });
 
@@ -343,7 +344,7 @@ describe('createFetch', () => {
 
       const fetch = createFetch();
       fetch.interceptors.response.use(async (response) => {
-        response.data = { ...response.data, asyncProcessed: true };
+        response.data = { ...(response.data ?? {}) as Record<string, unknown>, asyncProcessed: true };
         return response;
       });
 
@@ -743,7 +744,7 @@ describe('createFetch', () => {
     });
   });
 
-  describe('ADR 0004 修复回归', () => {
+  describe('aDR 0004 修复回归', () => {
     describe('决策 1 取消 key 统一为拦截器处理后的当前配置', () => {
       it('请求拦截器修改 key 后，abort 应按新 key 取消', async () => {
         mockUniRequest.mockImplementation(({ complete }) => {
