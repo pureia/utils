@@ -20,7 +20,9 @@ Status: accepted
 ### 2. 断言策略：保留运行时为真的断言，消除可推断的断言
 
 - **保留并注释**：正常合并路径（`request` 内 `as FullRequestConfig`）——spread 会把重叠字段推断为"可缺省"（如 `method: FetchMethod | undefined`），类型层面无法静态满足 `FullRequestConfig`，但运行时由 `defaults` 补齐字段，断言为真；同步兜底路径（最小兜底对象 `as FullRequestConfig`）——契约性类型谎言，字段本就缺失，注释已说明。
-- **消除**：快捷方法 4 处 `as RequestConfig`（`{...requestConfig, method: 'GET'}` 可静态推断满足 `RequestConfig`）；`FullRequestConfig & RequestConfig` 冗余交集移除。
+- **保留**：快捷方法 4 处 `as RequestConfig`——泛型 `R` 下 `Omit<Partial<R>, 'method'>` 无法静态满足 `Partial<R>`（`tsc` 报 TS2345），断言不可消除；`data` 传平台时的签名收窄（`data as UniApp.RequestOptions['data']`）为边界收窄。
+- **消除**：`FullRequestConfig & RequestConfig` 冗余交集（`FullRequestConfig` 已含 `RequestConfig`）。
+- **类型检查纪律**：tsdown 构建不做完整类型检查，类型验证须以 `tsc --noEmit` 为准。
 
 ### 3. 删除 `getStatusCodeMsg` 的 `-4` 分支
 
@@ -37,7 +39,7 @@ Status: accepted
 ## 后果
 
 - `data` 类型承诺收窄：`any` 从请求配置链路退出，拦截器对 `data` 的访问获得类型检查（读取需断言）。
-- 断言面收敛：3 处保留（2 处运行时为真 + 1 处兜底契约），4 处消除，冗余交集移除。
+- 断言分类清晰：合并断言（运行时为真）、兜底断言（契约性）、平台签名收窄、快捷方法断言（泛型 R 局限，不可消除）、冗余交集移除。
 - 死代码移除，哨兵描述表职责明确（`-4` 由 `normalizeError` 产出 msg）。
 - 运行时行为零变化，175 测试全绿，无需测试改动。
 

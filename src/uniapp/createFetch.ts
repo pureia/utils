@@ -563,7 +563,8 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     get<D = any>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'GET' });
+      // 泛型 R 下 Omit<Partial<R>, 'method'> 无法静态满足 Partial<R>（TS2345），需断言
+      return request<D>({ ...requestConfig, method: 'GET' } as RequestConfig);
     },
     /**
      * 发送 POST 请求
@@ -572,7 +573,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     post<D = any>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'POST' });
+      return request<D>({ ...requestConfig, method: 'POST' } as RequestConfig);
     },
     /**
      * 发送 PUT 请求
@@ -581,7 +582,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     put<D = any>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'PUT' });
+      return request<D>({ ...requestConfig, method: 'PUT' } as RequestConfig);
     },
     /**
      * 发送 DELETE 请求
@@ -590,7 +591,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     delete<D = any>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'DELETE' });
+      return request<D>({ ...requestConfig, method: 'DELETE' } as RequestConfig);
     },
   };
 }
