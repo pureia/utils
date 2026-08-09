@@ -12,6 +12,7 @@
     ".": "./dist/index.mjs",
     "./core": "./dist/core/index.mjs",
     "./core/createAsyncDedupe": "./dist/core/createAsyncDedupe.mjs",
+    "./core/createCancelable": "./dist/core/createCancelable.mjs",
     "./core/createEventEmitter": "./dist/core/createEventEmitter.mjs",
     "./core/stableStringify": "./dist/core/stableStringify.mjs",
     "./uniapp": "./dist/uniapp/index.mjs",

@@ -7,7 +7,7 @@ Status: accepted
 对 `createFetch` 的第四次审查发现以下语义缺陷/澄清点：
 
 1. **请求拦截器 `fulfilled` 返回值零校验**：ADR 0004 仅收紧 `rejected` 恢复值（`isRequestConfigLike` 校验 url+host），`fulfilled` 返回值直接透传。拦截器漏 `return config` 或返回缺 `host`/`url` 的配置时，后续要么拼出 `undefined${url}` 畸形请求 URL，要么在读取 `.key` 处抛晦涩 TypeError（无任何 `console.warn`），与响应拦截器 `fulfilled` 的校验行为（ADR 0002 §5）不对称。
-2. **`error` 字段契约与实现矛盾**：`ErrorResponseResult.error` 类型注释与 CONTEXT.md 均称"取消时 error 为 undefined"，但 `normalizeError` 的 `CancelError` 分支实际返回 `error: CancelError` 实例。
+2. **`error` 字段契约与实现矛盾**：`ResponseResult.error` 类型注释与 CONTEXT.md 均称"取消时 error 为 undefined"，但 `normalizeError` 的 `CancelError` 分支实际返回 `error: CancelError` 实例。
 3. **非去重同 key 并发的广播误杀未声明**：`abort(key)` 按 key 广播（`createCancelable` 语义），并发请求复用同一 key 时一次 abort 全部取消；ADR 0003 §3 仅描述了去重场景的广播，非去重场景未文档化。
 4. **dedup 路径下请求拦截器改写 key 失效**：去重共享执行剥除用户 key（`key: undefined`），ADR 0004 承诺的"请求拦截器改写 key 成为受支持的用法"在该路径下不成立，未澄清。
 
@@ -15,19 +15,19 @@ Status: accepted
 
 ### 1. 请求拦截器 `fulfilled` 返回值运行时校验
 
-复用 `isRequestConfigLike`（url 与 host 均为字符串），`fulfilled` 返回值非法则 `console.warn` 并忽略、沿用上一配置，与 `rejected` 恢复值校验（ADR 0004 §3）及响应拦截器 `fulfilled` 校验（ADR 0002 §5）行为完全对称。
+复用 `isRequestConfigLike`（url 与 host 均为字符串），`fulfilled` 返回值非法则 `console.warn` 并忽略、沿用上一配置，与响应拦截器 `fulfilled` 校验（ADR 0002 §5）行为对称。
 
 ### 2. `error` 字段契约以代码为准
 
-取消（`code: -1` 且源自用户 `abort(key)`）时 `error` 保留 `CancelError` 实例，供调试；传输层失败（HTTP 错误、超时、网络中止、未知错误）时 `error` 为 `undefined`。同步修正 `ErrorResponseResult.error` 类型注释与 CONTEXT.md 词条，消除文档与实现矛盾。
+取消（`code: -1` 且源自用户 `abort(key)`）时 `error` 保留 `CancelError` 实例，供调试；传输层失败（HTTP 错误、超时、网络中止、未知错误）时 `error` 为 `undefined`。同步修正 `ResponseResult.error` 类型注释与 CONTEXT.md 词条，消除文档与实现矛盾。
 
 ### 3. key 广播语义文档化
 
-`abort(key)` 按 key 广播是跨去重/非去重一致的语义：同一 key 下所有进行中的注册（拦截器阶段与传输层）统一收到 `code: -1`。文档化约束：key 应在并发请求间保持唯一，否则同 key 请求互为取消组。不引入按请求 token 的精确取消。
+`abort(key)` 按 key 广播：同一 key 下所有进行中的注册（拦截器阶段与传输层）统一收到 `code: -1`；去重请求的共享执行透传 key，abort 对该组为整组取消（见 ADR 0007）。文档化约束：key 应在并发请求间保持唯一，否则同 key 请求互为取消组。不引入按请求 token 的精确取消。
 
-### 4. dedup 路径改写 key 失效澄清
+### 4. dedup 路径取消语义（已被 ADR 0007 更新）
 
-去重共享执行阶段 key 已剥除，请求拦截器改写 key 在此路径下不生效；取消语义由外层每个调用者自身的 key 承担。这是对 ADR 0004 §1"改写 key 成为受支持的用法"的限定澄清——该用法仅对非去重请求成立。
+去重路径不再剥除用户 key：共享执行透传 key，请求拦截器改写 key 在去重路径同样生效（与 ADR 0004 §1 的"取消 key 统一为当前配置"一致）；`abort(key)` 对去重请求为整组取消（执行者与等待者同收 `-1`，见 ADR 0007）。
 
 ## 后果
 

@@ -24,6 +24,8 @@ Status: accepted
 
 `isRequestConfigLike` 收紧为校验 `url` 与 `host` 均为字符串（拼接完整 URL 的两个关键字段）。`rejected` 恢复值缺任一即告警并忽略、沿用上一配置，与 ADR 0003 §4 的"非法恢复值不污染链路"一致。
 
+> 已被 ADR 0006 取代：`rejected` 恢复语义整体移除，本条随之失效。
+
 ## 后果
 
 - `abort(key)` 在全链路（拦截器阶段与传输层）对同一 key 生效，请求拦截器改写 key 成为受支持的用法（限定：去重共享执行阶段 key 被剥除，改写不生效，见 ADR 0005 §4）。

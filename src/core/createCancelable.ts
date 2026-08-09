@@ -82,7 +82,14 @@ function createCancelable() {
    */
   const cancel = (key: string) => eventEmitter.emit(key, new CancelError(key));
 
-  return { cancelable, cancel };
+  /**
+   * 检查是否有进行中的取消调用
+   * @param key - 取消标识符
+   * @returns 是否有进行中的取消调用
+   */
+  const isPending = (key: string) => eventEmitter.has(key);
+
+  return { cancelable, cancel, isPending };
 }
 
 export { CancelError, createCancelable };

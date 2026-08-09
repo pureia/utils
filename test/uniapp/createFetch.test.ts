@@ -239,7 +239,7 @@ describe('createFetch', () => {
       );
     });
 
-    it('请求拦截器 fulfilled 抛错且无 rejected 时应归一化为拦截器错误', async () => {
+    it('请求拦截器 fulfilled 抛错时应归一化为拦截器错误', async () => {
       const fetch = createFetch();
       fetch.interceptors.request.use(() => {
         throw new Error('interceptor error');
@@ -251,46 +251,6 @@ describe('createFetch', () => {
       expect(result.msg).toBe('interceptor error');
       expect(result.data).toBeNull();
       if (!result.ok) expect(result.error).toBeInstanceOf(Error);
-    });
-
-    it('请求拦截器 rejected 返回 truthy 恢复值时应继续链路并发出请求', async () => {
-      mockSuccessResponse({ recovered: true });
-
-      const fetch = createFetch();
-      const fallbackConfig = {
-        url: '/fallback',
-        method: 'GET' as const,
-        host: 'https://api.example.com',
-        rawRequestConfig: { url: '/fallback', method: 'GET' as const },
-        header: { 'Content-Type': 'application/json' },
-        timeout: 10000,
-      };
-
-      fetch.interceptors.request.use(
-        () => { throw new Error('config error'); },
-        (() => fallbackConfig) as any
-      );
-
-      const result = await fetch.request({ url: '/users', method: 'GET' });
-      expect(mockUniRequest).toHaveBeenCalledWith(
-        expect.objectContaining({ url: 'https://api.example.com/fallback' })
-      );
-      expect(result.ok).toBe(true);
-      expect(result.data).toEqual({ recovered: true });
-    });
-
-    it('请求拦截器 rejected 返回 falsy 值时错误成立并归一化', async () => {
-      const fetch = createFetch();
-
-      fetch.interceptors.request.use(
-        () => { throw new Error('original error'); },
-        (() => null) as any
-      );
-
-      const result = await fetch.request({ url: '/users', method: 'GET' });
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe(FetchCode.INTERCEPTOR);
-      expect(result.msg).toBe('original error');
     });
 
     it('请求拦截器应该支持 async fulfilled', async () => {
@@ -345,7 +305,7 @@ describe('createFetch', () => {
       expect(result.data).toEqual({ id: 1, step1: true, step2: true });
     });
 
-    it('响应拦截器 fulfilled 抛错且无 rejected 时应归一化并保留响应现场', async () => {
+    it('响应拦截器 fulfilled 抛错时应归一化并保留响应现场', async () => {
       mockSuccessResponse({ error: 'unauthorized' }, 401);
 
       const fetch = createFetch();
@@ -376,50 +336,6 @@ describe('createFetch', () => {
       expect(result.ok).toBe(false);
       expect(result.code).toBe(FetchCode.INTERCEPTOR);
       expect(result.msg).toBe('余额不足');
-    });
-
-    it('响应拦截器 rejected 返回 truthy 恢复值时应继续链路', async () => {
-      mockSuccessResponse({ id: 1 });
-
-      const fetch = createFetch();
-      const fallbackResponse = {
-        ok: true,
-        msg: 'recovered',
-        code: 200,
-        data: { fallback: true },
-        cookies: [],
-        header: {},
-        requestConfig: {
-          url: '/fallback',
-          method: 'GET' as const,
-          host: 'https://api.example.com',
-          rawRequestConfig: { url: '/fallback', method: 'GET' as const },
-        },
-      };
-
-      fetch.interceptors.response.use(
-        () => { throw new Error('response error'); },
-        (() => fallbackResponse) as any
-      );
-
-      const result = await fetch.request({ url: '/users', method: 'GET' });
-      expect(result).toEqual(fallbackResponse);
-    });
-
-    it('响应拦截器 rejected 返回 falsy 值时错误成立并归一化', async () => {
-      mockSuccessResponse({ id: 1 });
-
-      const fetch = createFetch();
-      fetch.interceptors.response.use(
-        () => { throw new Error('response error'); },
-        (() => null) as any
-      );
-
-      const result = await fetch.request({ url: '/users', method: 'GET' });
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe(FetchCode.INTERCEPTOR);
-      expect(result.msg).toBe('response error');
-      expect(result.data).toEqual({ id: 1 });
     });
 
     it('响应拦截器应该支持 async fulfilled', async () => {
@@ -521,6 +437,32 @@ describe('createFetch', () => {
       expect(result.code).toBe(-3);
     });
 
+    it('statusCode 为负数（平台异常状态码）时应归一为 -3 而非透传（避免与哨兵码空间冲突）', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        complete({ data: null, statusCode: -1 as any, errMsg: 'request:fail' });
+      });
+
+      const fetch = createFetch();
+      const result = await fetch.request({ url: '/error', method: 'GET' });
+
+      // 平台 -1 不透传为 FetchCode.ABORT，归一到 -3 未知错误
+      expect(result.code).toBe(-3);
+      expect(result.msg).toBe('request:fail');
+    });
+
+    it('uni.request 同步抛错（请求未发出）应归一化为 -4 框架错误', async () => {
+      mockUniRequest.mockImplementation(() => {
+        throw new Error('invalid request params');
+      });
+
+      const fetch = createFetch();
+      const result = await fetch.request({ url: '/error', method: 'GET' });
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('invalid request params');
+    });
+
     it('errMsg 为 undefined 时 msg 应使用 HTTP 状态码描述', async () => {
       mockUniRequest.mockImplementation(({ complete }) => {
         complete({ data: null, statusCode: 200, errMsg: undefined as any });
@@ -545,22 +487,6 @@ describe('createFetch', () => {
     });
   });
 
-  describe('拦截器管理', () => {
-    it('interceptors.request.use 应该返回递增的索引', () => {
-      const fetch = createFetch();
-
-      expect(fetch.interceptors.request.use((config) => config)).toBe(0);
-      expect(fetch.interceptors.request.use((config) => config)).toBe(1);
-    });
-
-    it('interceptors.response.use 应该返回递增的索引', () => {
-      const fetch = createFetch();
-
-      expect(fetch.interceptors.response.use((response) => response)).toBe(0);
-      expect(fetch.interceptors.response.use((response) => response)).toBe(1);
-    });
-  });
-
   describe('请求取消 (abort)', () => {
     it('abort(key) 应归一化为中止结果并调用底层 requestTask.abort()', async () => {
       const mockRequestTask = { abort: vi.fn() };
@@ -577,6 +503,24 @@ describe('createFetch', () => {
       expect(result.code).toBe(FetchCode.ABORT);
       expect(result.msg).toBe('Request Abort');
       expect(mockRequestTask.abort).toHaveBeenCalled();
+    });
+
+    it('并发请求占用同一 key 时应告警（key 需唯一）', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const mockRequestTask = { abort: vi.fn() };
+      mockUniRequest.mockReturnValue(mockRequestTask); // 请求挂起，保持 key 占用
+
+      const fetch = createFetch();
+      const p1 = fetch.request({ url: '/users', method: 'GET', key: 'dup-key' });
+      // 非去重请求的 core 同步注册取消监听，第二个同 key 请求进入时即触发告警
+      const p2 = fetch.request({ url: '/users', method: 'GET', key: 'dup-key' });
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('key'));
+
+      warnSpy.mockRestore();
+      // 清理挂起请求，避免测试悬挂
+      fetch.abort('dup-key');
+      await Promise.allSettled([p1, p2]);
     });
 
     it('没有 key 的请求不受 abort 影响', async () => {
@@ -775,8 +719,8 @@ describe('createFetch', () => {
       });
     });
 
-    describe('决策 3 去重取消：abort 按 key 广播、共享执行不中断', () => {
-      it('isDedup 时 abort 应让同 key 调用者收到 -1 且共享执行（传输层）不中断', async () => {
+    describe('决策 3 去重取消：abort 整组取消', () => {
+      it('isDedup 时 abort 应让执行者与等待者统一收到 -1 并中止传输层', async () => {
         const mockRequestTask = { abort: vi.fn() };
         mockUniRequest.mockReturnValue(mockRequestTask); // 请求挂起，不触发 complete
 
@@ -784,55 +728,17 @@ describe('createFetch', () => {
         const p1 = fetch.request({ url: '/users', method: 'GET', key: 'dup' });
         const p2 = fetch.request({ url: '/users', method: 'GET', key: 'dup' });
 
+        // 共享执行在微任务中启动并注册取消监听，冲刷一次后再 abort
+        await Promise.resolve();
         fetch.abort('dup');
 
         const [r1, r2] = await Promise.all([p1, p2]);
         expect(r1.code).toBe(FetchCode.ABORT);
         expect(r2.code).toBe(FetchCode.ABORT);
-        // 共享执行（传输层）不因取消而中断：不调用 requestTask.abort
-        expect(mockRequestTask.abort).not.toHaveBeenCalled();
+        // 整组取消：传输层被中止
+        expect(mockRequestTask.abort).toHaveBeenCalled();
         // 去重仍生效：只发起一次请求
         expect(mockUniRequest).toHaveBeenCalledTimes(1);
-      });
-    });
-
-    describe('决策 4 rejected 恢复值运行时校验', () => {
-      it('请求拦截器 rejected 恢复值非法时应告警并忽略、沿用上一配置继续请求', async () => {
-        mockSuccessResponse({});
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        const fetch = createFetch();
-        fetch.interceptors.request.use(
-          () => { throw new Error('config error'); },
-          (() => 42) as any // truthy 但非请求配置
-        );
-
-        const result = await fetch.request({ url: '/users', method: 'GET' });
-
-        expect(warnSpy).toHaveBeenCalled();
-        expect(result.ok).toBe(true); // 恢复值被忽略，沿用原配置
-        expect(mockUniRequest).toHaveBeenCalledWith(
-          expect.objectContaining({ url: 'https://api.example.com/users' })
-        );
-        warnSpy.mockRestore();
-      });
-
-      it('响应拦截器 rejected 恢复值非法时应告警并忽略、沿用上一结果', async () => {
-        mockSuccessResponse({ id: 1 });
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        const fetch = createFetch();
-        fetch.interceptors.response.use(
-          () => { throw new Error('response error'); },
-          (() => ({ notAResponse: true })) as any // truthy 但非 ResponseResult
-        );
-
-        const result = await fetch.request({ url: '/users', method: 'GET' });
-
-        expect(warnSpy).toHaveBeenCalled();
-        expect(result.ok).toBe(true); // 恢复值被忽略，沿用原响应
-        expect(result.data).toEqual({ id: 1 });
-        warnSpy.mockRestore();
       });
     });
   });
@@ -886,28 +792,6 @@ describe('createFetch', () => {
 
         const result = await requestPromise;
         expect(result.ok).toBe(true);
-      });
-    });
-
-    describe('决策 3 请求拦截器恢复值校验收紧（url + host）', () => {
-      it('恢复值缺 host 时应告警并忽略、沿用原配置', async () => {
-        mockSuccessResponse({ ok: true });
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        const fetch = createFetch();
-        fetch.interceptors.request.use(
-          () => { throw new Error('config error'); },
-          (() => ({ url: '/fallback' })) as any // truthy 但缺 host
-        );
-
-        const result = await fetch.request({ url: '/users', method: 'GET' });
-
-        expect(warnSpy).toHaveBeenCalled();
-        expect(result.ok).toBe(true); // 恢复值被忽略，沿用原配置
-        expect(mockUniRequest).toHaveBeenCalledWith(
-          expect.objectContaining({ url: 'https://api.example.com/users' })
-        );
-        warnSpy.mockRestore();
       });
     });
   });

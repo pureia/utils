@@ -30,6 +30,8 @@ Status: accepted
 
 `rejected?: (error: unknown) => C | Promise<C>`，与"返回 truthy 即恢复链路"的语义一致，调用处不再强转。
 
+> 已被 ADR 0006 取代：`rejected` 恢复语义整体移除，拦截器仅保留 `fulfilled`。
+
 ### 4. 取消时保留响应现场
 
 `CancelError` 分支的 `data` 改为 `fallback?.data ?? null`，与拦截器错误分支行为一致。
