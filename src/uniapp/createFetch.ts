@@ -191,10 +191,10 @@ const HTTP_STATUS_TEXT: Record<number, string> = {
  * - 有 HTTP 状态码时（含 2xx 成功与 4xx/5xx 失败），使用 `HTTP_STATUS_TEXT` 中的描述；
  *   未收录的码（含后端自定义码）回退为 `HTTP ${code}`，保证恒有值——
  *   不透传 uni 的 `errMsg`（其描述传输层结果，HTTP 500 时 errMsg 恒为 "request:ok"，会误导）；
- * - 哨兵码使用固定描述（中止/超时/拦截器错误）或原始 `errMsg`（未知错误）。
+ * - 哨兵码使用固定描述（中止/超时）或原始 `errMsg`（未知错误）；`-4` 的 msg 不经本函数（见下）。
  *
- * 注意：`-4`（拦截器/业务错误）的 msg 在 `normalizeError` 中直接取抛出的业务消息，
- * 本分支仅作为哨兵码描述的防御性完备映射，供直接调用时兜底。
+ * 注意：`-4`（拦截器/业务错误）的 msg 由 `normalizeError` 直接取抛出的业务消息，
+ * 不经本函数；本函数仅覆盖哨兵码 `-1/-2/-3` 与 HTTP 状态码。
  *
  * @param code - 统一后的状态码
  * @param defaultMsg - 默认消息（uni 的 errMsg）
@@ -203,7 +203,6 @@ const HTTP_STATUS_TEXT: Record<number, string> = {
 function getStatusCodeMsg(code: number, defaultMsg?: string) {
   if (code === FetchCode.ABORT) return 'Request Abort';
   if (code === FetchCode.TIMEOUT) return 'Request Timeout';
-  if (code === FetchCode.INTERCEPTOR) return 'Request Interceptor Error';
   if (code < 0) return defaultMsg ?? 'Unknown Msg';
   return HTTP_STATUS_TEXT[code] ?? `HTTP ${code}`;
 }
@@ -302,12 +301,15 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
   type RequestConfig = Partial<OriginalRequestConfig> & {
     /** 请求路径，会与 host 拼接为完整 URL */
     url: string;
-    /** 请求数据，POST/PUT 等方法时使用 */
-    data?: any;
+    /**
+     * 请求数据，POST/PUT 等方法时使用；类型为 unknown：调用方传入任意值，
+     * 拦截器读取时需自行收窄/断言（与响应泛型 D 无关）。
+     */
+    data?: unknown;
     /**
      * 请求 key，用于通过 abort(key) 取消请求。
      * abort(key) 按 key 广播：并发请求间应保持 key 唯一，否则同 key 请求互为取消组，
-     * 一次 abort 会同时取消所有以该 key 注册的进行中阶段（拦截器与传输层）；
+     * 一次 abort 会同时取消所有以该 key 注册的进行中阶段（拦截器与传输层）。
      */
     key?: string;
   };
@@ -378,7 +380,8 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
         method,
         header,
         timeout,
-        data,
+        // data 类型为 unknown（见 RequestConfig），传平台时按 uni.request 签名收窄
+        data: data as UniApp.RequestOptions['data'],
         complete(result) {
           const {
             data: respData,
@@ -495,9 +498,12 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
    * @returns 响应结果 Promise
    */
   const request = <D = any>(requestConfig: RequestConfig): Promise<ResponseResult<FullRequestConfig, D>> => {
-    let fullRequestConfig: FullRequestConfig & RequestConfig;
+    let fullRequestConfig: FullRequestConfig;
     try {
       const defaults = getOriginalRequestConfig();
+      // 合并对象在运行时字段齐全（defaults 补齐 RequestConfig 的全部缺省字段），
+      // 但类型层面 spread 会把重叠字段推断为"可缺省"（如 method: FetchMethod | undefined），
+      // 无法静态满足 FullRequestConfig，故保留此运行时为真的断言。
       fullRequestConfig = {
         ...defaults,
         ...requestConfig,
@@ -557,8 +563,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     get<D = any>(requestConfig: ShortcutRequestConfig) {
-      // 泛型 R 下 Partial<R> 无法由具体对象类型静态满足，需断言到 RequestConfig
-      return request<D>({ ...requestConfig, method: 'GET' } as RequestConfig);
+      return request<D>({ ...requestConfig, method: 'GET' });
     },
     /**
      * 发送 POST 请求
@@ -567,7 +572,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     post<D = any>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'POST' } as RequestConfig);
+      return request<D>({ ...requestConfig, method: 'POST' });
     },
     /**
      * 发送 PUT 请求
@@ -576,7 +581,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     put<D = any>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'PUT' } as RequestConfig);
+      return request<D>({ ...requestConfig, method: 'PUT' });
     },
     /**
      * 发送 DELETE 请求
@@ -585,7 +590,7 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * @returns 响应结果 Promise
      */
     delete<D = any>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'DELETE' } as RequestConfig);
+      return request<D>({ ...requestConfig, method: 'DELETE' });
     },
   };
 }
