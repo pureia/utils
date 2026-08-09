@@ -87,6 +87,32 @@ function isResponseResultLike(value: unknown): boolean {
 }
 
 /**
+ * `buildFullConfig` 的请求配置约束：默认配置的部分覆盖 + url/data/key 扩展
+ *
+ * `method`/`header` 显式放开为可选（而非继承默认配置的窄字面量类型），
+ * 避免默认配置字面量（如 `method: 'GET'`）卡死请求配置的类型。
+ */
+type RequestConfigLike<R extends BaseRequestConfig> = Omit<Partial<R>, 'method' | 'header'> & {
+  url: string;
+  data?: unknown;
+  key?: string;
+  method?: FetchMethod;
+  header?: Record<string, string>;
+};
+
+/**
+ * 默认配置与请求配置合并后的完整配置（`buildFullConfig` 的返回类型）
+ *
+ * 为 Omit 形态：请求配置提供的字段整体替换为请求配置的类型（含 `rawRequestConfig` 原始引用、
+ * 深合并后的 `header`）。与请求实例内的 `FullRequestConfig`（交集形态，由 defaults 补齐必填字段）
+ * 语义不同——本类型对"必填型请求配置"调用方给出更精确的合并结果。
+ */
+type MergedRequestConfig<
+  R extends BaseRequestConfig,
+  RC extends RequestConfigLike<R>
+> = Omit<R, keyof RC> & RC & { readonly rawRequestConfig: RC; header: Record<string, string> };
+
+/**
  * 合并默认配置与请求配置为完整请求配置
  *
  * 合并规则：`header` 按字段深合并（叠加）；其余字段请求配置提供即整体替换
@@ -97,18 +123,12 @@ function isResponseResultLike(value: unknown): boolean {
  * @typeParam RC - 请求配置类型（默认配置的部分覆盖 + url/data/key 扩展）
  * @param defaults - 默认配置
  * @param requestConfig - 请求配置（url 为必填）
- * @returns 完整请求配置（请求配置覆盖字段整体替换；header 深合并）
+ * @returns 合并后的完整配置（MergedRequestConfig）
  */
 export function buildFullConfig<
   R extends BaseRequestConfig,
-  RC extends Omit<Partial<R>, 'method' | 'header'> & {
-    url: string;
-    data?: unknown;
-    key?: string;
-    method?: FetchMethod;
-    header?: Record<string, string>;
-  }
->(defaults: R, requestConfig: RC): Omit<R, keyof RC> & RC & { readonly rawRequestConfig: RC; header: Record<string, string> } {
+  RC extends RequestConfigLike<R>
+>(defaults: R, requestConfig: RC): MergedRequestConfig<R, RC> {
   // 合并对象在运行时字段齐全（defaults 补齐 RC 缺省的必填字段），
   // 但类型层面 spread 会把重叠字段推断为"可缺省"（如 method: FetchMethod | undefined），
   // 无法静态满足目标类型，故保留此运行时为真的断言。
@@ -117,7 +137,7 @@ export function buildFullConfig<
     ...requestConfig,
     rawRequestConfig: requestConfig,
     header: { ...defaults.header, ...requestConfig.header },
-  } as Omit<R, keyof RC> & RC & { readonly rawRequestConfig: RC; header: Record<string, string> };
+  } as MergedRequestConfig<R, RC>;
 }
 
 /**
