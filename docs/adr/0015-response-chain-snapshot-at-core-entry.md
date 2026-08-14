@@ -18,6 +18,8 @@ Status: accepted
 ```ts
 const requestInterceptorChain = [...interceptors.request.handlers];
 const responseInterceptorChain = [...interceptors.response.handlers];
+// 两链随后分别被请求/响应阶段遍历执行（略）
+void [requestInterceptorChain, responseInterceptorChain];
 ```
 
 响应链快照点由「响应阶段开始前」前移至「core 入口」，注释同步更新（删除原「链快照与取消 key 理由同请求拦截」的延后声明）。

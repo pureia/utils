@@ -224,4 +224,41 @@ describe('createEventEmitter', () => {
       expect(handler2).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('off with an explicit handler reference', () => {
+    it('should remove the specified handler without affecting others on the same key', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      const h1 = vi.fn();
+      const h2 = vi.fn();
+      emitter.on('user:login', h1);
+      emitter.on('user:login', h2);
+
+      emitter.off('user:login', h1);
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+
+      expect(h1).not.toHaveBeenCalled();
+      expect(h2).toHaveBeenCalledTimes(1);
+    });
+
+    it('should clear the key when the last handler is removed', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      const h1 = vi.fn();
+      emitter.on('user:login', h1);
+
+      emitter.off('user:login', h1);
+
+      expect(emitter.has('user:login')).toBe(false);
+      expect(() => emitter.emit('user:login', { userId: '1', name: 'John' })).not.toThrow();
+    });
+
+    it('should be a silent no-op for unknown key or handler', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      const h1 = vi.fn();
+      emitter.on('user:login', h1);
+
+      expect(() => emitter.off('cart:update', h1)).not.toThrow();
+      expect(() => emitter.off('user:login', () => {})).not.toThrow();
+      expect(emitter.has('user:login')).toBe(true);
+    });
+  });
 });

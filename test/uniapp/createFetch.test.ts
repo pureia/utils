@@ -1,5 +1,4 @@
 import type { BaseRequestConfig } from '@purea/utils';
-import { merge } from '@purea/utils/lodash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFetch as _createFetch, buildFullConfig, CancelError, FetchCode } from '@purea/utils';
 
@@ -17,7 +16,7 @@ function getOriginalRequestConfig<C extends Record<string, any>>(otherConfig?: C
     method: 'GET',
     isDedup: false,
   };
-  return merge(baseConfig, otherConfig);
+  return { ...baseConfig, ...otherConfig };
 }
 
 function createFetch<T extends Record<string, any>>(overrides?: T) {
@@ -451,6 +450,19 @@ describe('createFetch', () => {
       expect(result.msg).toBe('request:fail');
     });
 
+    it('statusCode 为 1-99 的异常正数时应归一为 -3 而非透传', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        complete({ data: null, statusCode: 60 as any, errMsg: 'request:fail' });
+      });
+
+      const fetch = createFetch();
+      const result = await fetch.request({ url: '/error', method: 'GET' });
+
+      // 仅 100-599 视为有效 HTTP 状态码
+      expect(result.code).toBe(-3);
+      expect(result.msg).toBe('request:fail');
+    });
+
     it('uni.request 同步抛错（请求未发出）应归一化为 -4 框架错误', async () => {
       mockUniRequest.mockImplementation(() => {
         throw new Error('invalid request params');
@@ -863,6 +875,58 @@ describe('createFetch', () => {
       expect(config.method).toBe('POST');
       expect(config.timeout).toBe(5000);
       expect(config.rawRequestConfig).toEqual({ url: '/users', method: 'POST', timeout: 5000 });
+    });
+  });
+
+  describe('拦截器返回值运行时校验', () => {
+    it('请求拦截器返回非法配置（缺 url/host）时应告警并沿用上一配置', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = createFetch();
+        fetch.interceptors.request.use(() => ({ method: 'GET' }) as any);
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(mockUniRequest).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.example.com/users' }));
+        expect(warnSpy).toHaveBeenCalled();
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器返回非 ResponseResult 时应告警并沿用上一结果', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = createFetch();
+        fetch.interceptors.response.use(() => ({ hello: 'world' }) as any);
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(result.code).toBe(200);
+        expect(warnSpy).toHaveBeenCalled();
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('自定义 logger', () => {
+    it('logger 应接管告警输出（console.warn 不被调用）', async () => {
+      const warn = vi.fn();
+      mockSuccessResponse({ id: 1 });
+      const fetch = _createFetch(() => getOriginalRequestConfig(), { logger: { warn } });
+      fetch.interceptors.request.use(() => ({ method: 'GET' }) as any);
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+
+      expect(result.ok).toBe(true);
+      expect(warn).toHaveBeenCalled();
     });
   });
 });

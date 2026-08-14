@@ -19,7 +19,7 @@ Status: accepted
 两个分支接口合并为一个扁平接口，公共字段（`BaseResponseResult`）一并吸收，`BaseResponseResult` 不再单独存在：
 
 ```ts
-interface ResponseResult<R, D> {
+export interface ResponseResult<R, D> {
   ok: boolean;
   code: number;
   msg: string;

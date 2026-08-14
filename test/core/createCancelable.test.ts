@@ -112,4 +112,39 @@ describe('createCancelable', () => {
       expect(err.message).toBe('my-key async call canceled');
     });
   });
+
+  describe('isPending 状态查询', () => {
+    it('执行期间应为 true', () => {
+      const { cancelable: c, isPending } = createCancelable();
+      expect(isPending('key')).toBe(false);
+
+      c('key', () => new Promise<void>(() => {}));
+      expect(isPending('key')).toBe(true);
+    });
+
+    it('执行完成后应为 false', async () => {
+      const { cancelable: c, isPending } = createCancelable();
+      const promise = c('key', () => Promise.resolve('done'));
+
+      await promise;
+      // finally(off) 在结果落定后的链上执行，冲刷一次微任务后断言
+      await Promise.resolve();
+      expect(isPending('key')).toBe(false);
+    });
+
+    it('取消后应为 false', async () => {
+      const { cancelable: c, cancel, isPending } = createCancelable();
+      const promise = c('key', () => new Promise<void>(() => {}));
+
+      cancel('key');
+      // once 监听触发即自清理
+      expect(isPending('key')).toBe(false);
+      await expect(promise).rejects.toBeInstanceOf(CancelError);
+    });
+
+    it('未注册的 key 应为 false', () => {
+      const { isPending } = createCancelable();
+      expect(isPending('nope')).toBe(false);
+    });
+  });
 });

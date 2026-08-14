@@ -5,7 +5,6 @@ export default defineConfig({
   // （相对路径由 vite 基于项目根解析）
   resolve: {
     alias: [
-      { find: '@purea/utils/lodash', replacement: './src/third-party/lodash.ts' },
       { find: /^@purea\/utils$/, replacement: './src/index.ts' },
     ],
   },

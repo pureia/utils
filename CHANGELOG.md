@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `createFetch` 支持自定义 logger（第二参数 `{ logger }`），可静默或接管库内告警输出
+- 去重请求起跑前（同一 tick）的 `abort(key)` 支持：执行者短路、整组归一化为 `-1` 且不发起请求（见 ADR 0018）
+- 测试直连源码（vitest 别名 + tsconfig paths），避免测到陈旧构建产物
+- 新增回归测试：isPending 状态查询、`off(key, handler)` 直接调用形态、拦截器非法返回值告警分支、自定义 logger、1-99 异常状态码归一化
+- MIT LICENSE 与包元数据（license / author / repository）
+- README（安装、快速上手、API 总览）
+- CONTEXT.md 新增「核心工具域」词条
+
+### Changed
+
+- `getStatusCode` 收紧有效 HTTP 状态码范围为 100-599：1-99 的异常正数归一为 `-3` 而非透传
+- `stableStringify` 循环检测由 O(n²) 数组扫描改为 Set（O(1)），并补充 json-stable-stringify 移植版权声明
+- ADR 索引新增 0018；ADR 0009/0015 文档代码块 lint 修复
+
+### Removed
+
+- **破坏性变更**：移除 `@purea/utils/lodash` 子路径导出与 `lodash-es`/`@types/lodash-es` 依赖（库自身未使用，如使用方需要请直接安装 `lodash-es`）
+
+## [0.0.6] - 2026-08-09
+
+### Added
+
+- 新增 `createCancelable` 核心工具：可取消的异步执行（`CancelError` / `cancel` / `onCancel` / `isPending`）
+- 导出 `buildFullConfig` 与 `MergedRequestConfig` 类型，配置合并成为公共 API
+- 项目文档体系：CONTEXT.md 词表 + 架构决策记录（ADR 0001–0017）与索引表
+
+### Changed
+
+- 请求错误归一化：成功、传输错误、HTTP 错误、业务错误、取消全部归一为统一响应结果，永不 reject
+- 拦截器返回值运行时校验：请求拦截器校验 url/host，响应拦截器校验 ok/code，非法返回值告警并沿用上一值
+- `data` 类型收窄为 `unknown`：请求配置与响应数据需调用方自行收窄/断言
+- 响应拦截器链快照前置到 core 入口，与请求链快照语义一致
+- 快捷方法（get/post/put/delete）类型断言调整
+- `simpleHash` 补全哈希字符串长度
+
+### Fixed
+
+- 哨兵码取值空间守卫：平台异常负状态码归一为 `-3` 而非透传，避免与 `-1/-2/-3/-4` 哨兵码冲突
+- 去重请求取消语义修复（整组取消）
+
 ## [0.0.5] - 2026-07-22
 
 ### Added
@@ -74,8 +118,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增事件存储功能 `useEventStore`，支持全局单例模式
 - 新增异步防抖功能 `useAsyncDebounce`
 
-[0.0.5]: https://github.com/purea/utils/compare/v0.0.4...HEAD
-[0.0.4]: https://github.com/purea/utils/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/purea/utils/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/purea/utils/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/purea/utils/releases/tag/v0.0.1
+[Unreleased]: https://github.com/pureia/utils/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/pureia/utils/compare/v0.0.5...v0.0.6
+[0.0.5]: https://github.com/pureia/utils/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/pureia/utils/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/pureia/utils/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/pureia/utils/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/pureia/utils/releases/tag/v0.0.1
