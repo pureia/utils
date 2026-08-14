@@ -1,9 +1,9 @@
 {
   "name": "@purea/utils",
   "type": "module",
-  "version": "0.0.6",
+  "version": "0.1.0",
   "packageManager": "pnpm@10.33.2",
-  "description": "Pure Anin Utils",
+  "description": "小而美的 TypeScript 异步工具：可取消执行、并发去重、类型安全事件、稳定序列化，以及开箱即用的 uni-app 请求封装",
   "author": "Pure Anin <pureanin@gmail.com>",
   "license": "MIT",
   "repository": {
@@ -12,6 +12,10 @@
   },
   "keywords": [
     "utils",
+    "typescript",
+    "async",
+    "cancel",
+    "dedupe",
     "uni-app",
     "fetch"
   ],
@@ -30,16 +34,21 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "test": "vitest run",
     "lint": "eslint --fix .",
+    "lint:check": "eslint .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "devDependencies": {
     "@dcloudio/types": "^3.4.31",
-    "@purea/eslint-config": "latest",
+    "@purea/eslint-config": "^0.0.6",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.39.4",
     "jiti": "^2.6.1",

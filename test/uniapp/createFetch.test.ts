@@ -338,6 +338,36 @@ describe('createFetch', () => {
       expect(result.msg).toBe('余额不足');
     });
 
+    it('响应拦截器抛出无 message/msg 的普通对象时 msg 应回退为 Unknown Error', async () => {
+      mockSuccessResponse({ id: 1 });
+
+      const fetch = createFetch();
+      fetch.interceptors.response.use(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw {};
+      });
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('Unknown Error');
+    });
+
+    it('响应拦截器抛出数字时 msg 应回退为 Unknown Error', async () => {
+      mockSuccessResponse({ id: 1 });
+
+      const fetch = createFetch();
+      fetch.interceptors.response.use(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw 42;
+      });
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('Unknown Error');
+    });
+
     it('响应拦截器应该支持 async fulfilled', async () => {
       mockSuccessResponse({ id: 1 });
 
@@ -461,6 +491,18 @@ describe('createFetch', () => {
       // 仅 100-599 视为有效 HTTP 状态码
       expect(result.code).toBe(-3);
       expect(result.msg).toBe('request:fail');
+    });
+
+    it('statusCode 为 undefined 且 errMsg 为 undefined 时 msg 应回退为 Unknown Msg', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        complete({ data: null, statusCode: undefined as any, errMsg: undefined as any });
+      });
+
+      const fetch = createFetch();
+      const result = await fetch.request({ url: '/error', method: 'GET' });
+
+      expect(result.code).toBe(-3);
+      expect(result.msg).toBe('Unknown Msg');
     });
 
     it('uni.request 同步抛错（请求未发出）应归一化为 -4 框架错误', async () => {

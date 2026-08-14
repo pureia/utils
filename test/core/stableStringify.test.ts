@@ -136,7 +136,7 @@ describe('stableStringify', () => {
     it('replacer 可以修改值', () => {
       const obj = { a: 1, b: 2 };
       const result = stableStringify(obj, {
-        replacer: (_parent, key, value) => (typeof value === 'number' ? value * 2 : value),
+        replacer: (_parent, _key, value) => (typeof value === 'number' ? value * 2 : value),
       });
       expect(result).toBe('{"a":2,"b":4}');
     });

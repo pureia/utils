@@ -673,6 +673,7 @@ export {
   createFetch,
   FetchCode,
   type FetchLogger,
+  type MergedRequestConfig,
   type ResponseResult,
 };
 

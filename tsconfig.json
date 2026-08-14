@@ -9,7 +9,11 @@
     },
     "types": ["@dcloudio/types"],
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "esModuleInterop": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
   "include": ["**/*.ts"]

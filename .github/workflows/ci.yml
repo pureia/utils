@@ -27,10 +27,13 @@ jobs:
         run: pnpm exec tsc --noEmit
 
       - name: Lint
-        run: pnpm exec eslint .
+        run: pnpm run lint:check
 
       - name: Test
         run: pnpm run test
+
+      - name: Coverage
+        run: pnpm run test:coverage
 
       - name: Build
         run: pnpm run build

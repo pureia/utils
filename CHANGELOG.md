@@ -5,27 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-08-14
 
 ### Added
 
 - `createFetch` 支持自定义 logger（第二参数 `{ logger }`），可静默或接管库内告警输出
+- `createEventEmitter` 支持 `onError` 注入，处理器抛错时可接管默认的 `console.error` 输出
+- 补 `MergedRequestConfig` 类型按名导出（`buildFullConfig` 的返回类型）
 - 去重请求起跑前（同一 tick）的 `abort(key)` 支持：执行者短路、整组归一化为 `-1` 且不发起请求（见 ADR 0018）
 - 测试直连源码（vitest 别名 + tsconfig paths），避免测到陈旧构建产物
-- 新增回归测试：isPending 状态查询、`off(key, handler)` 直接调用形态、拦截器非法返回值告警分支、自定义 logger、1-99 异常状态码归一化
-- MIT LICENSE 与包元数据（license / author / repository）
-- README（安装、快速上手、API 总览）
-- CONTEXT.md 新增「核心工具域」词条
+- 新增 CI 工作流：typecheck / lint / test / coverage（阈值 95%）/ build 五道门禁；`lint:check`、`test:coverage` 脚本
+- 新增回归测试：isPending 状态查询、`off(key, handler)` 直接调用形态、拦截器非法返回值告警分支、自定义 logger、1-99 异常状态码归一化、`getErrorMessage` 兜底分支
+- MIT LICENSE 与包元数据（license / author / repository / description / keywords / engines）
+- README（简介、安装、快速上手、核心工具表）
+- CONTEXT.md 新增「核心工具域」词条；ADR 索引新增 0019
 
 ### Changed
 
 - `getStatusCode` 收紧有效 HTTP 状态码范围为 100-599：1-99 的异常正数归一为 `-3` 而非透传
 - `stableStringify` 循环检测由 O(n²) 数组扫描改为 Set（O(1)），并补充 json-stable-stringify 移植版权声明
+- tsconfig 收紧：`noUnusedLocals` / `noUnusedParameters` / `isolatedModules` / `verbatimModuleSyntax`
+- `@purea/eslint-config` 由 `latest` 锁为 `^0.0.6`，保证 CI 可复现
 - ADR 索引新增 0018；ADR 0009/0015 文档代码块 lint 修复
 
 ### Removed
 
-- **破坏性变更**：移除 `@purea/utils/lodash` 子路径导出与 `lodash-es`/`@types/lodash-es` 依赖（库自身未使用，如使用方需要请直接安装 `lodash-es`）
+- **破坏性变更**：移除 `@purea/utils/lodash` 子路径导出与 `lodash-es`/`@types/lodash-es` 依赖（库自身未使用，使用方如需请直接安装 `lodash-es`，见 ADR 0019）
 
 ## [0.0.6] - 2026-08-09
 
@@ -118,7 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增事件存储功能 `useEventStore`，支持全局单例模式
 - 新增异步防抖功能 `useAsyncDebounce`
 
-[Unreleased]: https://github.com/pureia/utils/compare/v0.0.6...HEAD
+[0.1.0]: https://github.com/pureia/utils/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/pureia/utils/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/pureia/utils/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/pureia/utils/compare/v0.0.3...v0.0.4

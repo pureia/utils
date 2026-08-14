@@ -15,6 +15,8 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * 订阅函数会返回取消订阅函数，方便在组件卸载时清理。
  *
  * @typeParam E - 事件定义对象，键为事件名，值为事件载荷类型
+ * @param options - 可选配置
+ * @param options.onError - 处理程序抛错时的回调，默认使用 `console.error` 输出
  * @returns 事件发射器实例
  *
  * @example
@@ -39,8 +41,14 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * emitter.emit('count', 2); // 无输出（已自动取消）
  * ```
  */
-function createEventEmitter<E extends Record<string, any> = Record<string, any>>() {
+function createEventEmitter<E extends Record<string, any> = Record<string, any>>(
+  options?: { onError?: (key: EventKey<E>, error: unknown) => void }
+) {
   const store = new Map<EventKey<E>, Set<(result: E[EventKey<E>]) => void>>();
+  /** 处理程序抛错时的默认兜底：沿用原有控制台格式 */
+  const onError = options?.onError ?? ((key: EventKey<E>, error: unknown) => {
+    console.error(`createEventEmitter error in "${String(key)}":`, error);
+  });
 
   /**
    * 获取所有已注册的事件键
@@ -111,7 +119,7 @@ function createEventEmitter<E extends Record<string, any> = Record<string, any>>
   /**
    * 发布事件，通知所有订阅了该事件的处理程序
    *
-   * 处理程序中的错误会被捕获并输出到控制台，不会影响其他处理程序的执行。
+   * 处理程序中的错误会被捕获并交给 `onError`（默认输出到控制台），不会影响其他处理程序的执行。
    *
    * @param key - 事件键
    * @param result - 事件载荷
@@ -123,7 +131,7 @@ function createEventEmitter<E extends Record<string, any> = Record<string, any>>
         handler(result);
       }
       catch (error) {
-        console.error(`createEventEmitter error in "${String(key)}":`, error);
+        onError(key, error);
       }
     });
   }
