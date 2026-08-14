@@ -1,4 +1,4 @@
-import { CancelError, createAsyncDedupe, createCancelable, stableStringify } from '../core';
+import { CancelError, createAsyncDedupe, createCancelable, createEventEmitter, stableStringify } from '../core';
 
 /** 请求方法类型 */
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
@@ -343,6 +343,8 @@ function createInterceptorManager<C>() {
 function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
   const { asyncDedupe } = createAsyncDedupe();
   const { cancelable, cancel, isPending } = createCancelable();
+  // 取消意向：只承载「abort 已发生」的标记，不参与执行期注册，避免污染 isPending
+  const cancelIntentEmitter = createEventEmitter<Record<string, CancelError>>();
 
   /** 原始请求配置类型，由 getOriginalRequestConfig 返回值推断 */
   type OriginalRequestConfig = ReturnType<typeof getOriginalRequestConfig>;
@@ -578,7 +580,12 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
 
     // 去重请求取消 = 整组取消：共享执行透传用户 key，abort(key) 中止整组共享执行
     // （拦截器/传输层），执行者与所有等待者统一收到 -1。
-    return asyncDedupe(dedupKey, () => core<D>(fullRequestConfig));
+    if (!fullRequestConfig.key) return asyncDedupe(dedupKey, () => core<D>(fullRequestConfig));
+
+    let cancelled = false;
+    const offIntent = cancelIntentEmitter.once(fullRequestConfig.key, () => { cancelled = true; });
+    const executor = () => cancelled ? Promise.resolve(normalizeError<D>(new CancelError(fullRequestConfig.key!), undefined, fullRequestConfig)) : core<D>(fullRequestConfig);
+    return asyncDedupe(dedupKey, executor).finally(offIntent);
   };
 
   return {
@@ -590,7 +597,10 @@ function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () =
      * 取消只丢弃未落定的结果，不打断已进入的拦截器代码执行（其副作用仍会跑完）；
      * 未知 key 的 abort 为静默 no-op（请求完成后对旧 key 的兜底取消是合法用法）。
      */
-    abort: cancel,
+    abort: (key: string) => {
+      cancel(key); // 执行期取消（拦截器/传输层，现有路径）
+      cancelIntentEmitter.emit(key, new CancelError(key)); // 起跑前取消（新路径）
+    },
     /**
      * 拦截器管理器，包含 request（请求拦截）和 response（响应拦截）
      *

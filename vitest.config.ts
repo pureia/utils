@@ -1,6 +1,14 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // 测试经包名导入时直连源码，避免测到 gitignored 的 dist 陈旧产物
+  // （相对路径由 vite 基于项目根解析）
+  resolve: {
+    alias: [
+      { find: '@purea/utils/lodash', replacement: './src/third-party/lodash.ts' },
+      { find: /^@purea\/utils$/, replacement: './src/index.ts' },
+    ],
+  },
   test: {
     include: ['test/**/*.test.ts'],
     coverage: {

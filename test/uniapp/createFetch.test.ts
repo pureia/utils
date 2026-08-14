@@ -741,6 +741,50 @@ describe('createFetch', () => {
         // 去重仍生效：只发起一次请求
         expect(mockUniRequest).toHaveBeenCalledTimes(1);
       });
+
+      it('执行者起跑前同步 abort（同一 tick）应让整组统一收到 -1 且不发起请求', async () => {
+        mockSuccessResponse({ id: 1 }); // 若取消意向短路失效，执行者会照常发起并成功
+        const fetch = createFetch({ isDedup: true });
+        const p1 = fetch.request({ url: '/users', method: 'GET', key: 'pre-start' });
+        const p2 = fetch.request({ url: '/users', method: 'GET', key: 'pre-start' });
+        // 不冲刷任何微任务：共享执行尚未起跑、取消监听尚未注册（ADR 0018 取消意向覆盖此窗口）
+        fetch.abort('pre-start');
+
+        const [r1, r2] = await Promise.all([p1, p2]);
+        expect(r1.code).toBe(FetchCode.ABORT);
+        expect(r2.code).toBe(FetchCode.ABORT);
+        expect(r1.error).toBeInstanceOf(CancelError);
+        // 意向短路：传输层从未发起
+        expect(mockUniRequest).not.toHaveBeenCalled();
+      });
+
+      it('去重 key 请求正常完成不应误告警 key 占用（取消意向注册不污染 isPending）', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          mockSuccessResponse({ id: 2 });
+          const fetch = createFetch({ isDedup: true });
+          const result = await fetch.request({ url: '/users', method: 'GET', key: 'no-warn' });
+          expect(result.ok).toBe(true);
+          expect(warnSpy).not.toHaveBeenCalled();
+        }
+        finally {
+          warnSpy.mockRestore();
+        }
+      });
+
+      it('同步 abort 后以同一 key 发起新请求应正常执行（取消意向监听无残留）', async () => {
+        mockSuccessResponse({ id: 3 });
+        const fetch = createFetch({ isDedup: true });
+        const p1 = fetch.request({ url: '/users', method: 'GET', key: 'reuse' });
+        fetch.abort('reuse');
+        const r1 = await p1;
+        expect(r1.code).toBe(FetchCode.ABORT);
+        // 旧 key 的意向监听已清理，新组应正常执行
+        const r2 = await fetch.request({ url: '/users', method: 'GET', key: 'reuse' });
+        expect(r2.ok).toBe(true);
+        expect(r2.code).toBe(200);
+        expect(mockUniRequest).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

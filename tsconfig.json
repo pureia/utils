@@ -7,7 +7,11 @@
     "types": ["@dcloudio/types"],
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@purea/utils": ["./src/index.ts"],
+      "@purea/utils/lodash": ["./src/third-party/lodash.ts"]
+    }
   },
   "include": ["**/*.ts"]
 }
