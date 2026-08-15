@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `getErrorMessage` 对 `message`/`msg` 分别校验非空字符串：空 `message` 不再遮蔽有效的 `msg`
 - `createInterceptorManager` 收敛公共面：拦截器数组私有化，仅暴露 `use`；core 经 `snapshot()` 读取拦截器链快照（调用方无法绕过 `use` 修改拦截器链）
 - package.json 工程补强：新增 `typecheck` 脚本（CI 复用）、`publishConfig.access: public`、exports 补 `./package.json` 子路径
-- CI 工程补强：Node 18/22 版本矩阵；新增 `publint`（包元数据检查）与 `attw`（arethetypeswrong，`esm-only` 模式类型解析检查）两道门禁（新增 devDependencies：`publint`、`@arethetypeswrong/cli`）
+- CI 工程补强：Node 22/24 版本矩阵（lint 工具链依赖 `Object.groupBy`，要求 Node 21+，Node 18/20 无法运行 lint；`engines >=18` 为运行时契约）；新增 `publint`（包元数据检查）与 `attw`（arethetypeswrong，`esm-only` 模式类型解析检查）两道门禁（新增 devDependencies：`publint`、`@arethetypeswrong/cli`）
+- eslint 配置由 `eslint.config.ts` 改为 `eslint.config.mjs`（纯样板配置，绕开 jiti 转译），移除 `jiti` devDependency
 - 测试稳定性：`createAsyncDedupe` 计时/性能断言改用假计时器（消除慢 CI 上的毫秒阈值抖动）；`createAsyncDedupe`/`createCancelable` 测试改为每测试新建实例（消除共享实例的隐藏耦合）；`createFetch` 测试显式 `unstubAllGlobals` 收尾
 - tsconfig 收紧：`noUnusedLocals` / `noUnusedParameters` / `isolatedModules` / `verbatimModuleSyntax`
 - `@purea/eslint-config` 由 `latest` 锁为 `^0.0.6`，保证 CI 可复现

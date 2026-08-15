@@ -9,8 +9,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     strategy:
+      # lint 工具链（@purea/eslint-config → @antfu/eslint-config）依赖 Object.groupBy（Node 21+），
+      # 故最小测试版本为 22；engines >=18 为运行时契约（构建产物 target node18）
       matrix:
-        node: [18, 22]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
