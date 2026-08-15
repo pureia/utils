@@ -27,6 +27,7 @@
     "./core/createCancelable": "./dist/core/createCancelable.mjs",
     "./core/createEventEmitter": "./dist/core/createEventEmitter.mjs",
     "./core/stableStringify": "./dist/core/stableStringify.mjs",
+    "./package.json": "./package.json",
     "./uniapp": "./dist/uniapp/index.mjs",
     "./uniapp/createFetch": "./dist/uniapp/createFetch.mjs"
   },
@@ -37,21 +38,29 @@
   "engines": {
     "node": ">=18"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
     "lint": "eslint --fix .",
     "lint:check": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "publint": "publint",
+    "attw": "attw --pack . --profile esm-only",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@dcloudio/types": "^3.4.31",
     "@purea/eslint-config": "^0.0.6",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.39.4",
     "jiti": "^2.6.1",
+    "publint": "^0.3.23",
     "tsdown": "^0.22.12",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
