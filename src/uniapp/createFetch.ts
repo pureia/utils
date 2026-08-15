@@ -151,8 +151,10 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   if (typeof error === 'object' && error !== null) {
-    const maybeMessage = (error as { message?: unknown }).message ?? (error as { msg?: unknown }).msg;
-    if (typeof maybeMessage === 'string' && maybeMessage) return maybeMessage;
+    // message/msg 分别校验为非空字符串：空 message 不得遮蔽有效的 msg
+    const { message, msg } = error as { message?: unknown; msg?: unknown };
+    if (typeof message === 'string' && message) return message;
+    if (typeof msg === 'string' && msg) return msg;
   }
   return 'Unknown Error';
 }

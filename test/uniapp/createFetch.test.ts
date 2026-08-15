@@ -338,6 +338,36 @@ describe('createFetch', () => {
       expect(result.msg).toBe('余额不足');
     });
 
+    it('响应拦截器抛出的对象含空 message 与有效 msg 时，msg 不应被空串遮蔽', async () => {
+      mockSuccessResponse({ code: 50001, msg: '余额不足' });
+
+      const fetch = createFetch();
+      fetch.interceptors.response.use(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw { message: '', msg: '余额不足' };
+      });
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('余额不足'); // 修复前为 'Unknown Error'
+    });
+
+    it('响应拦截器抛出的对象 message 与 msg 均为空串时应回退为 Unknown Error', async () => {
+      mockSuccessResponse({ id: 1 });
+
+      const fetch = createFetch();
+      fetch.interceptors.response.use(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw { message: '', msg: '' };
+      });
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('Unknown Error');
+    });
+
     it('响应拦截器抛出无 message/msg 的普通对象时 msg 应回退为 Unknown Error', async () => {
       mockSuccessResponse({ id: 1 });
 
