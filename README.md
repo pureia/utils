@@ -97,7 +97,6 @@ export interface ResponseResult<R, D> {
 ```
 
 - 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。
-- 自定义日志：`createFetch(getConfig, { logger: { warn: () => {} } })` 可静默或接管库内告警输出。
 
 ## License
 

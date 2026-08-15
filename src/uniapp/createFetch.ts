@@ -285,15 +285,6 @@ function createInterceptorManager<C>() {
 }
 
 /**
- * `createFetch` 的可选 logger，接管库内的告警输出（默认使用 console）
- *
- * 传入 `{ warn: () => {} }` 可静默告警。
- */
-interface FetchLogger {
-  warn: (...args: unknown[]) => void;
-}
-
-/**
  * 创建一个 UniApp 请求实例，支持拦截器、请求去重和请求取消。
  *
  * 基于 `uni.request` 封装，提供请求/响应拦截器、自动请求去重、请求任务管理等功能。
@@ -303,8 +294,6 @@ interface FetchLogger {
  *
  * @typeParam R - 基础请求配置类型，需继承 `BaseRequestConfig`
  * @param getOriginalRequestConfig - 获取默认请求配置的函数，每次请求时调用以获取基础配置
- * @param options - 可选配置
- * @param options.logger - 覆盖库内的 warn 告警输出（默认 console）
  * @returns 请求实例，包含以下方法：
  *   - `request(config)` - 发送请求
  *   - `get(config)` - 发送 GET 请求
@@ -352,12 +341,10 @@ interface FetchLogger {
  * ```
  */
 function createFetch<R extends BaseRequestConfig>(
-  getOriginalRequestConfig: () => R,
-  options?: { logger?: FetchLogger }
+  getOriginalRequestConfig: () => R
 ) {
   const { asyncDedupe } = createAsyncDedupe();
   const { cancelable, cancel, isPending } = createCancelable();
-  const logger: FetchLogger = options?.logger ?? console;
   // 取消意向：只承载「abort 已发生」的标记，不参与执行期注册，避免污染 isPending
   const cancelIntentEmitter = createEventEmitter<Record<string, CancelError>>();
 
@@ -495,7 +482,7 @@ function createFetch<R extends BaseRequestConfig>(
   const core = async <D>(config: FullRequestConfig) => {
     let fullRequestConfig = config;
     // key 唯一性告警：另一进行中的请求已占用该 key，abort(key) 将同时取消它们
-    fullRequestConfig.key && isPending(fullRequestConfig.key) && logger.warn(`[createFetch] key "${fullRequestConfig.key}" 已被其他进行中的请求占用，abort(key) 会同时取消所有同 key 请求，请保证并发请求间 key 唯一`);
+    fullRequestConfig.key && isPending(fullRequestConfig.key) && console.warn(`[createFetch] key "${fullRequestConfig.key}" 已被其他进行中的请求占用，abort(key) 会同时取消所有同 key 请求，请保证并发请求间 key 唯一`);
     // 拦截器链快照：进入 core 时对请求/响应链一次快照（见 ADR 0004 §2），
     // 进行中的请求只执行发起时刻已注册的拦截器，执行期间新注册的只影响后续请求
     const requestInterceptorChain = [...interceptors.request.handlers];
@@ -508,7 +495,7 @@ function createFetch<R extends BaseRequestConfig>(
         // 非法（如漏 return、缺 url/host）则告警并沿用上一配置，避免后续拼出 `undefined${url}`
         // 畸形 URL 或在读取 .key 处抛晦涩 TypeError。
         if (!isRequestConfigLike(interceptorResult)) {
-          logger.warn('[createFetch] 请求拦截器必须返回请求配置（含 url 与 host 字段），非法返回值已被忽略');
+          console.warn('[createFetch] 请求拦截器必须返回请求配置（含 url 与 host 字段），非法返回值已被忽略');
         }
         else {
           fullRequestConfig = interceptorResult;
@@ -537,7 +524,7 @@ function createFetch<R extends BaseRequestConfig>(
         // 运行时校验：响应拦截器必须返回合法的统一响应结果，否则告警并沿用上一结果，
         // 避免类型谎言沿拦截器链扩散（如需"解包"，应改写 ResponseResult.data 而非返回裸数据）。
         if (!isResponseResultLike(interceptorResult)) {
-          logger.warn('[createFetch] 响应拦截器必须返回 ResponseResult（含 ok/code 字段），非法返回值已被忽略');
+          console.warn('[createFetch] 响应拦截器必须返回 ResponseResult（含 ok/code 字段），非法返回值已被忽略');
         }
         else {
           // 边界断言：返回值已通过 isResponseResultLike 运行时形状校验（ok/code），
@@ -672,7 +659,6 @@ export {
   type BaseRequestConfig,
   createFetch,
   FetchCode,
-  type FetchLogger,
   type MergedRequestConfig,
   type ResponseResult,
 };

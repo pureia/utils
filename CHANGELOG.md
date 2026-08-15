@@ -9,13 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `createFetch` 支持自定义 logger（第二参数 `{ logger }`），可静默或接管库内告警输出
 - `createEventEmitter` 支持 `onError` 注入，处理器抛错时可接管默认的 `console.error` 输出
 - 补 `MergedRequestConfig` 类型按名导出（`buildFullConfig` 的返回类型）
 - 去重请求起跑前（同一 tick）的 `abort(key)` 支持：执行者短路、整组归一化为 `-1` 且不发起请求（见 ADR 0018）
 - 测试直连源码（vitest 别名 + tsconfig paths），避免测到陈旧构建产物
 - 新增 CI 工作流：typecheck / lint / test / coverage（阈值 95%）/ build 五道门禁；`lint:check`、`test:coverage` 脚本
-- 新增回归测试：isPending 状态查询、`off(key, handler)` 直接调用形态、拦截器非法返回值告警分支、自定义 logger、1-99 异常状态码归一化、`getErrorMessage` 兜底分支
+- 新增回归测试：isPending 状态查询、`off(key, handler)` 直接调用形态、拦截器非法返回值告警分支、1-99 异常状态码归一化、`getErrorMessage` 兜底分支
 - MIT LICENSE 与包元数据（license / author / repository / description / keywords / engines）
 - README（简介、安装、快速上手、核心工具表）
 - CONTEXT.md 新增「核心工具域」词条；ADR 索引新增 0019

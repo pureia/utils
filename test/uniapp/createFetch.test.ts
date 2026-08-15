@@ -957,18 +957,4 @@ describe('createFetch', () => {
       }
     });
   });
-
-  describe('自定义 logger', () => {
-    it('logger 应接管告警输出（console.warn 不被调用）', async () => {
-      const warn = vi.fn();
-      mockSuccessResponse({ id: 1 });
-      const fetch = _createFetch(() => getOriginalRequestConfig(), { logger: { warn } });
-      fetch.interceptors.request.use(() => ({ method: 'GET' }) as any);
-
-      const result = await fetch.request({ url: '/users', method: 'GET' });
-
-      expect(result.ok).toBe(true);
-      expect(warn).toHaveBeenCalled();
-    });
-  });
 });
