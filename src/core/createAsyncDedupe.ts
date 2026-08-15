@@ -61,7 +61,7 @@ function createAsyncDedupe() {
    * @param asyncFunc - 要执行的异步函数
    * @returns 返回一个 Promise，解析为异步函数的结果
    */
-  function asyncDedupe<V>(key: string, asyncFunc: () => Promise<V>): Promise<V> {
+  function asyncDedupe<V>(key: string, asyncFunc: () => V | Promise<V>): Promise<V> {
     // 如果事件已存在，说明已有相同 key 的请求在进行中，不再重复执行
     !eventEmitter.has(key) && cancelable(key, asyncFunc).then(result => {
       eventEmitter.emit(key, { fulfilled: result });
