@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stableStringify` 循环检测由 O(n²) 数组扫描改为 Set（O(1)），并补充 json-stable-stringify 移植版权声明
 - `stableStringify` 的 `space` 与空容器格式对齐原生 `JSON.stringify`：数字截断并钳制 [0,10]（负数/NaN 无缩进，Infinity/超大值不挂死）、字符串取前 10 码元、非数字/字符串类型按无缩进、空容器恒紧凑输出；移除 `collapseEmpty` 选项
 - `createCancelable` 启动前取消短路：同一 tick 内 `cancel` 后工作函数不再启动（副作用不发生）；已启动的工作仍跑完（见 ADR 0023）
+- `createEventEmitter` 的 `emit` 改为快照迭代（本轮触发期间订阅/取消不影响本轮，对齐 Node 惯例；杜绝 once 互相重订阅导致的活迭代无限增长）
 - tsconfig 收紧：`noUnusedLocals` / `noUnusedParameters` / `isolatedModules` / `verbatimModuleSyntax`
 - `@purea/eslint-config` 由 `latest` 锁为 `^0.0.6`，保证 CI 可复现
 - ADR 索引新增 0018；ADR 0009/0015 文档代码块 lint 修复

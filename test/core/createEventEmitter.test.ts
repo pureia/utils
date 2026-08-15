@@ -225,6 +225,51 @@ describe('createEventEmitter', () => {
     });
   });
 
+  describe('emit 快照迭代（对齐 Node 惯例）', () => {
+    it('emit 期间新订阅的 handler 不参与本轮', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      const calls: string[] = [];
+      emitter.on('user:login', () => {
+        calls.push('a');
+        emitter.on('user:login', () => calls.push('late-subscriber'));
+      });
+      emitter.on('user:login', () => calls.push('b'));
+
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      expect(calls).toEqual(['a', 'b']); // 本轮不触发 late-subscriber
+
+      emitter.emit('user:login', { userId: '2', name: 'Jane' });
+      // 下一轮生效（a/b 仍在订阅，重复执行；late-subscriber 本轮才首次触发）
+      expect(calls).toEqual(['a', 'b', 'a', 'b', 'late-subscriber']);
+    });
+
+    it('emit 期间移除的 handler 本轮仍执行（快照已含之），下一轮不再执行', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      const h1 = vi.fn();
+      const h2 = vi.fn();
+      emitter.on('user:login', h1);
+      emitter.on('user:login', h2);
+
+      emitter.on('user:login', () => emitter.off('user:login', h2));
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      expect(h2).toHaveBeenCalledTimes(1); // 本轮仍执行
+
+      emitter.emit('user:login', { userId: '2', name: 'Jane' });
+      expect(h2).toHaveBeenCalledTimes(1); // 下一轮已被移除
+    });
+
+    it('once 处理器在 emit 期间互相重订阅不应在同一轮内级联触发（杜绝活迭代增长）', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      let depth = 0;
+      const a = () => { depth++; emitter.once('user:login', b); };
+      const b = () => { depth++; emitter.once('user:login', a); };
+      emitter.once('user:login', a);
+      emitter.once('user:login', b);
+
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      expect(depth).toBe(2); // 快照：本轮只执行初始注册的两个
+    });
+  });
   describe('off with an explicit handler reference', () => {
     it('should remove the specified handler without affecting others on the same key', () => {
       const emitter = createEventEmitter<TestEvents>();

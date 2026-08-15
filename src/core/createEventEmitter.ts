@@ -119,14 +119,18 @@ function createEventEmitter<E extends Record<string, any> = Record<string, any>>
   /**
    * 发布事件，通知所有订阅了该事件的处理程序
    *
-   * 处理程序中的错误会被捕获并交给 `onError`（默认输出到控制台），不会影响其他处理程序的执行。
+   * 处理程序中的错误会被捕获并交给 `onError`（默认输出到控制台），不会影响其他处理程序的执行；
+   * 注意 `onError` 自身抛错会中断剩余处理器并向 emit 调用方传播（注入方责任）。
    *
    * @param key - 事件键
    * @param result - 事件载荷
    */
   function emit<K extends EventKey<E>>(key: K, result: EventPayload<E, K>): void {
     const handlers = store.get(key);
-    handlers?.forEach(handler => {
+    if (!handlers) return;
+    // 快照迭代：emit 期间注册/移除的处理器不影响本轮（对齐 Node 惯例）——
+    // 杜绝 once 互相重订阅在活迭代下无限增长（Set 按引用去重防不住每次新建的 once 包装）
+    [...handlers].forEach(handler => {
       try {
         handler(result);
       }
