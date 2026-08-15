@@ -4,10 +4,6 @@ import { createFetch as _createFetch, buildFullConfig, CancelError, FetchCode } 
 
 const mockUniRequest = vi.fn();
 
-vi.stubGlobal('uni', {
-  request: mockUniRequest,
-});
-
 function getOriginalRequestConfig<C extends Record<string, any>>(otherConfig?: C) {
   const baseConfig: BaseRequestConfig = {
     host: 'https://api.example.com',
@@ -37,10 +33,12 @@ function mockSuccessResponse(data: any, statusCode = 200, errMsg = 'request:ok',
 }
 
 beforeEach(() => {
+  vi.stubGlobal('uni', { request: mockUniRequest });
   mockUniRequest.mockReset();
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals(); // 显式收尾，避免全局 stub 跨测试残留
   mockUniRequest.mockReset();
 });
 

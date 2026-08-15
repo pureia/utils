@@ -1,8 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
 import { CancelError, createAsyncDedupe } from '@purea/utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('createAsyncDedupe', () => {
-  const { asyncDedupe: dedupe } = createAsyncDedupe();
+  let dedupe: ReturnType<typeof createAsyncDedupe>['asyncDedupe'];
+
+  // 每测试新建实例，避免 describe 层共享实例造成的隐藏耦合（监听器泄漏/键复用）
+  beforeEach(() => {
+    ({ asyncDedupe: dedupe } = createAsyncDedupe());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers(); // 兜底：假计时器测试自行恢复
+  });
 
   describe('基本功能', () => {
     it('应该成功执行异步函数并返回结果', async () => {
@@ -146,18 +155,21 @@ describe('createAsyncDedupe', () => {
       expect(asyncFunc).toHaveBeenCalledTimes(2);
     });
 
-    it('去重应该节省总执行时间', async () => {
+    it('去重应该节省总执行时间（单次执行耗时，而非并发叠加）', async () => {
+      // 假计时器：毫秒阈值断言在慢 CI 上易抖动，改为确定性推进
+      vi.useFakeTimers();
       const asyncFunc = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(resolve, 100, 'done')));
 
-      const start = Date.now();
-      await Promise.all([
+      const promises = [
         dedupe('timing-key', asyncFunc),
         dedupe('timing-key', asyncFunc),
         dedupe('timing-key', asyncFunc),
-      ]);
-      const elapsed = Date.now() - start;
+      ];
+      // 推进恰好一个执行周期（100ms）：整组应同时落定，而非每个调用各等 100ms
+      await vi.advanceTimersByTimeAsync(100);
 
-      expect(elapsed).toBeLessThan(150);
+      const results = await Promise.all(promises);
+      expect(results).toEqual(['done', 'done', 'done']);
       expect(asyncFunc).toHaveBeenCalledTimes(1);
     });
   });
@@ -540,20 +552,20 @@ describe('createAsyncDedupe', () => {
   });
 
   describe('性能测试', () => {
-    it('大量并发调用不应该造成性能问题', async () => {
+    it('大量并发等待者应共享一次执行并全部正确落定', async () => {
+      // 假计时器：墙钟阈值断言在慢 CI 上易抖动，改为功能断言（1000 等待者单次执行）
+      vi.useFakeTimers();
       const { asyncDedupe: dedupe } = createAsyncDedupe();
       const func = vi.fn().mockImplementation(() =>
         new Promise(resolve => setTimeout(resolve, 10, 'perf-result'))
       );
 
-      const start = performance.now();
       const promises = Array.from({ length: 1000 }, () => dedupe('perf-key', func));
-      const results = await Promise.all(promises);
-      const elapsed = performance.now() - start;
+      await vi.advanceTimersByTimeAsync(10);
 
+      const results = await Promise.all(promises);
       expect(func).toHaveBeenCalledTimes(1);
       expect(results.every(r => r === 'perf-result')).toBe(true);
-      expect(elapsed).toBeLessThan(100);
     });
 
     it('大量不同 key 的调用应该各自执行', async () => {

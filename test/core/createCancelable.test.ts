@@ -2,20 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { CancelError, createCancelable } from '@purea/utils';
 
 describe('createCancelable', () => {
-  const { cancelable } = createCancelable();
-
   describe('cancelable 基本执行', () => {
+    // 每测试新建实例，避免 describe 层共享实例的隐藏耦合（同 key 监听器叠加/泄漏）
     it('应该正常执行异步函数并返回结果', async () => {
+      const { cancelable } = createCancelable();
       const result = await cancelable('key1', () => Promise.resolve(42));
       expect(result).toBe(42);
     });
 
     it('应该正常执行同步函数并返回结果', async () => {
+      const { cancelable } = createCancelable();
       const result = await cancelable('key1', () => 42);
       expect(result).toBe(42);
     });
 
     it('应该传播异步函数的拒绝', async () => {
+      const { cancelable } = createCancelable();
       const error = new Error('test error');
       await expect(cancelable('key1', () => Promise.reject(error))).rejects.toBe(error);
     });
