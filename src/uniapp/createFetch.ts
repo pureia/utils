@@ -599,7 +599,7 @@ function createFetch<R extends BaseRequestConfig>(
      * 取消只丢弃未落定的结果，不打断已进入的拦截器代码执行（其副作用仍会跑完）；
      * 未知 key 的 abort 为静默 no-op（请求完成后对旧 key 的兜底取消是合法用法）。
      */
-    abort: (key: string) => {
+    abort(key: string) {
       cancel(key); // 执行期取消（拦截器/传输层，现有路径）
       cancelIntentEmitter.emit(key, new CancelError(key)); // 起跑前取消（新路径）
     },
