@@ -30,7 +30,7 @@ type CmpFunc = (
 type ReplacerFunc = (this: any, parent: any, key: string | number, value: any) => any;
 
 interface StableStringifyOptions {
-  /** 缩进，数字表示空格数，字符串直接用作缩进 */
+  /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元 */
   space?: string | number;
   /**
    * 自定义 key 排序比较函数。
@@ -42,8 +42,6 @@ interface StableStringifyOptions {
   replacer?: ReplacerFunc;
   /** 是否将循环引用序列化为 `"__cycle__"` 而非抛错，默认 false */
   cycles?: boolean;
-  /** 是否将空对象/数组紧凑输出为 {} / []，默认 false */
-  collapseEmpty?: boolean;
 }
 
 function strRepeat(n: number, char: string): string {
@@ -61,18 +59,16 @@ function strRepeat(n: number, char: string): string {
  * - 对象 key 按字母序（UTF-16 码点）输出，而非插入顺序
  * - `replacer` 签名为 `(parent, key, value)`，第一个参数是父对象（替代了原生的 `this` 绑定）
  * - 支持 `cycles` 选项将循环引用序列化为 `"__cycle__"` 而非抛错
- * - 支持 `collapseEmpty` 选项将空对象/数组紧凑输出
+ * - 空容器（{} / []）恒紧凑输出，与原生一致
  *
  * @param obj - 要序列化的值
  * @param opts - 选项对象，或直接传入 `CmpFunc` 比较函数作为第二个参数
- * @param opts.space - 缩进，数字表示空格数，字符串直接用作缩进。不传则输出紧凑格式
+ * @param opts.space - 缩进，对齐原生 JSON.stringify：数字截断（ToIntegerOrInfinity）后钳制到 [0, 10]（负数/NaN → 无缩进），字符串仅取前 10 个码元；不传则输出紧凑格式
  * @param opts.cmp - 自定义 key 排序比较函数，签名 `({ key, value }, { key, value }, getter?) => number`
  * @param opts.replacer - 过滤/转换函数，签名 `(parent, key, value) => any`，返回 `undefined` 跳过该属性
  * @param opts.cycles - 为 `true` 时将循环引用序列化为 `"__cycle__"`，默认 `false` 则抛出 `TypeError`
- * @param opts.collapseEmpty - 为 `true` 时将空对象/数组紧凑输出为 `{}` / `[]`（即使在 pretty-print 模式下），默认 `false`
  * @returns 稳定的 JSON 字符串；当顶层值为 `undefined` 时返回 `undefined`
  * @throws {TypeError} 遇到循环引用且 `cycles` 未启用时抛出
- * @throws {TypeError} `collapseEmpty` 传入非布尔值时抛出
  *
  * @example
  * // 基本排序
@@ -100,15 +96,22 @@ function strRepeat(n: number, char: string): string {
 function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
   const isObj = opts != null && typeof opts === 'object';
 
-  const space = isObj && opts.space !== undefined
-    ? (typeof opts.space === 'number' ? strRepeat(opts.space, ' ') : opts.space)
-    : '';
-  const cycles = isObj && opts.cycles === true;
-
-  if (isObj && typeof opts.collapseEmpty !== 'undefined' && typeof opts.collapseEmpty !== 'boolean') {
-    throw new TypeError('`collapseEmpty` must be a boolean, if provided');
+  // 缩进对齐原生 JSON.stringify 语义：
+  // - 数字：ToIntegerOrInfinity 截断后钳制到 [0, 10]（负数/NaN → 无缩进；Infinity/超大值 → 10，
+  //   避免 strRepeat 无限循环与内存压力）
+  // - 字符串：仅取前 10 个码元
+  // - 其余类型（boolean 等）：原生按无缩进处理
+  let space = '';
+  if (isObj && opts.space !== undefined) {
+    if (typeof opts.space === 'number') {
+      const n = Math.trunc(opts.space);
+      space = n >= 1 ? ' '.repeat(Math.min(10, n)) : '';
+    }
+    else if (typeof opts.space === 'string') {
+      space = opts.space.slice(0, 10);
+    }
   }
-  const collapseEmpty = isObj && opts.collapseEmpty === true;
+  const cycles = isObj && opts.cycles === true;
 
   const defaultReplacer: ReplacerFunc = (_parent, _key, value) => value;
   const replacer = isObj && typeof opts.replacer === 'function' ? opts.replacer : defaultReplacer;
@@ -141,8 +144,9 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
 
     if (typeof node !== 'object' || node === null) return JSON.stringify(node);
 
+    // 空容器恒输出紧凑括号（与原生 JSON.stringify 一致，即使 pretty-print 模式）
     function groupOutput(out: string[], brackets: '[]' | '{}'): string {
-      return collapseEmpty && out.length === 0
+      return out.length === 0
         ? brackets
         : (brackets === '[]' ? '[' : '{') + out.join(',') + indent + (brackets === '[]' ? ']' : '}');
     }

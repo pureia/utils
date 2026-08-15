@@ -229,34 +229,56 @@ describe('stableStringify', () => {
     });
   });
 
-  describe('collapseEmpty 扩展', () => {
-    it('collapseEmpty: true 时空对象应紧凑输出 {}', () => {
-      const obj = { a: {} };
-      const result = stableStringify(obj, { collapseEmpty: true });
-      expect(result).toBe('{"a":{}}');
+  describe('空容器格式（与原生 JSON.stringify 对齐）', () => {
+    it('pretty-print 模式下空对象应紧凑输出 {}', () => {
+      expect(stableStringify({}, { space: 2 })).toBe('{}');
+      expect(stableStringify({}, { space: 2 })).toBe(JSON.stringify({}, null, 2));
     });
 
-    it('collapseEmpty: true 时空数组应紧凑输出 []', () => {
+    it('pretty-print 模式下嵌套空对象应紧凑输出', () => {
+      const obj = { a: {} };
+      expect(stableStringify(obj, { space: 2 })).toBe('{\n  "a": {}\n}');
+      expect(stableStringify(obj, { space: 2 })).toBe(JSON.stringify(obj, null, 2));
+    });
+
+    it('pretty-print 模式下空数组应紧凑输出 []', () => {
       const obj = { a: [] };
-      const result = stableStringify(obj, { collapseEmpty: true });
-      expect(result).toBe('{"a":[]}');
+      expect(stableStringify(obj, { space: 2 })).toBe('{\n  "a": []\n}');
+      expect(stableStringify(obj, { space: 2 })).toBe(JSON.stringify(obj, null, 2));
+    });
+  });
+
+  describe('space 归一化（与原生 JSON.stringify 对齐）', () => {
+    it('负数应视为无缩进', () => {
+      expect(stableStringify({ a: 1 }, { space: -1 })).toBe('{"a":1}');
+      expect(stableStringify({ a: 1 }, { space: -1 })).toBe(JSON.stringify({ a: 1 }, null, -1));
     });
 
-    it('collapseEmpty: true 时 pretty-print 模式下空对象也应紧凑输出', () => {
-      const obj = { a: {} };
-      const result = stableStringify(obj, { space: 2, collapseEmpty: true });
-      expect(result).toBe('{\n  "a": {}\n}');
+    it('小数应截断而非四舍五入', () => {
+      expect(stableStringify({ a: 1 }, { space: 1.5 })).toBe(JSON.stringify({ a: 1 }, null, 1.5));
+      expect(stableStringify({ a: 1 }, { space: 1.9 })).toBe(JSON.stringify({ a: 1 }, null, 1.9));
     });
 
-    it('collapseEmpty: false 时 pretty-print 模式下空对象应换行缩进', () => {
-      const obj = { a: {} };
-      const result = stableStringify(obj, { space: 2, collapseEmpty: false });
-      expect(result).toBe('{\n  "a": {\n  }\n}');
+    it('超过 10 的数字应钳制为 10 个空格', () => {
+      expect(stableStringify({ a: 1 }, { space: 11 })).toBe(JSON.stringify({ a: 1 }, null, 11));
+      expect(stableStringify({ a: 1 }, { space: 100 })).toBe(JSON.stringify({ a: 1 }, null, 100));
     });
 
-    it('collapseEmpty 传入非 boolean 时应抛出 TypeError', () => {
-      const obj = { a: 1 };
-      expect(() => stableStringify(obj, { collapseEmpty: 1 as any })).toThrow(TypeError);
+    it('space 为 Infinity 时应钳制为 10 个空格而非挂死/OOM', () => {
+      expect(stableStringify({ a: 1 }, { space: Number.POSITIVE_INFINITY })).toBe(JSON.stringify({ a: 1 }, null, Number.POSITIVE_INFINITY));
+    });
+
+    it('space 为 NaN 时应视为无缩进', () => {
+      expect(stableStringify({ a: 1 }, { space: Number.NaN })).toBe('{"a":1}');
+    });
+
+    it('非数字/字符串类型应视为无缩进（与原生一致）', () => {
+      expect(stableStringify({ a: 1 }, { space: true as any })).toBe(JSON.stringify({ a: 1 }, null, true as any));
+    });
+
+    it('字符串缩进应截取前 10 个码元', () => {
+      const s = 'x'.repeat(20);
+      expect(stableStringify({ a: 1 }, { space: s })).toBe(JSON.stringify({ a: 1 }, null, s));
     });
   });
 
