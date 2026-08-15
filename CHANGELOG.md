@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `createCancelable` 启动前取消短路：同一 tick 内 `cancel` 后工作函数不再启动（副作用不发生）；已启动的工作仍跑完（见 ADR 0023）
 - `createEventEmitter` 的 `emit` 改为快照迭代（本轮触发期间订阅/取消不影响本轮，对齐 Node 惯例；杜绝 once 互相重订阅导致的活迭代无限增长）
 - `getErrorMessage` 对 `message`/`msg` 分别校验非空字符串：空 `message` 不再遮蔽有效的 `msg`
+- `createInterceptorManager` 收敛公共面：拦截器数组私有化，仅暴露 `use`；core 经 `snapshot()` 读取拦截器链快照（调用方无法绕过 `use` 修改拦截器链）
 - tsconfig 收紧：`noUnusedLocals` / `noUnusedParameters` / `isolatedModules` / `verbatimModuleSyntax`
 - `@purea/eslint-config` 由 `latest` 锁为 `^0.0.6`，保证 CI 可复现
 - ADR 索引新增 0018；ADR 0009/0015 文档代码块 lint 修复

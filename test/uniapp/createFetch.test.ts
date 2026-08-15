@@ -194,6 +194,31 @@ describe('createFetch', () => {
     });
   });
 
+  describe('拦截器管理器公共面', () => {
+    it('interceptors 仅暴露 use（handlers/snapshot 不对外）', () => {
+      const fetch = createFetch();
+
+      expect(Object.keys(fetch.interceptors.request)).toEqual(['use']);
+      expect(Object.keys(fetch.interceptors.response)).toEqual(['use']);
+      expect('handlers' in fetch.interceptors.request).toBe(false);
+      expect('snapshot' in fetch.interceptors.request).toBe(false);
+      expect('handlers' in fetch.interceptors.response).toBe(false);
+      expect('snapshot' in fetch.interceptors.response).toBe(false);
+    });
+
+    it('通过 use 注册的拦截器按序进入 core 快照', async () => {
+      mockSuccessResponse({ id: 1 });
+      const calls: string[] = [];
+      const fetch = createFetch();
+      fetch.interceptors.request.use((config) => { calls.push('first'); return config; });
+      fetch.interceptors.request.use((config) => { calls.push('second'); return config; });
+
+      await fetch.request({ url: '/users', method: 'GET' });
+
+      expect(calls).toEqual(['first', 'second']);
+    });
+  });
+
   describe('请求拦截器', () => {
     it('应该在发送请求前执行请求拦截器', async () => {
       mockSuccessResponse({});

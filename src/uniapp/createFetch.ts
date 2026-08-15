@@ -266,8 +266,11 @@ function getStatusCodeMsg(code: number, defaultMsg?: string) {
 /**
  * 拦截器管理器，用于管理请求/响应拦截器链
  *
+ * 拦截器数组为私有状态：公共面仅暴露 `use` 注册方法，`snapshot()` 仅供 core
+ * 入口读取快照（见 ADR 0004 §2/0015）——调用方无法绕过 `use` 直接修改拦截器链。
+ *
  * @typeParam C - 拦截器处理的数据类型
- * @returns 拦截器管理器实例，包含 handlers 数组和 use 注册方法
+ * @returns 拦截器管理器实例（use 注册 + snapshot 快照）
  */
 function createInterceptorManager<C>() {
   /** 拦截器处理函数：接收数据并返回处理后的数据（支持异步）；抛错由错误归一化收口 */
@@ -277,13 +280,18 @@ function createInterceptorManager<C>() {
   /**
    * 注册拦截器
    * @param fulfilled - 成功处理函数
-   * @remarks 注册请走 use；handlers 仅供 core 链快照读取，勿直接改动
    */
   const use = (fulfilled: InterceptorHandler) => {
     handlers.push(fulfilled);
   };
 
-  return { handlers, use };
+  /**
+   * 当前已注册拦截器链的快照（数组副本），core 入口一次性读取
+   * @returns 按注册顺序排列的拦截器数组
+   */
+  const snapshot = () => [...handlers];
+
+  return { use, snapshot };
 }
 
 /**
@@ -380,9 +388,13 @@ function createFetch<R extends BaseRequestConfig>(
   /** 完整请求配置，合并了默认配置、请求配置和原始请求配置引用 */
   type FullRequestConfig = OriginalRequestConfig & RequestConfig & { readonly rawRequestConfig: RequestConfig };
 
+  const requestManager = createInterceptorManager<FullRequestConfig>();
+  const responseManager = createInterceptorManager<ResponseResult<FullRequestConfig, unknown>>();
+  // 公共面仅暴露 use：snapshot 与拦截器数组为内部实现（core 入口快照读取），
+  // 调用方无法绕过 use 修改拦截器链
   const interceptors = {
-    request: createInterceptorManager<FullRequestConfig>(),
-    response: createInterceptorManager<ResponseResult<FullRequestConfig, unknown>>(),
+    request: { use: requestManager.use },
+    response: { use: responseManager.use },
   };
 
   /**
@@ -487,8 +499,8 @@ function createFetch<R extends BaseRequestConfig>(
     fullRequestConfig.key && isPending(fullRequestConfig.key) && console.warn(`[createFetch] key "${fullRequestConfig.key}" 已被其他进行中的请求占用，abort(key) 会同时取消所有同 key 请求，请保证并发请求间 key 唯一`);
     // 拦截器链快照：进入 core 时对请求/响应链一次快照（见 ADR 0004 §2），
     // 进行中的请求只执行发起时刻已注册的拦截器，执行期间新注册的只影响后续请求
-    const requestInterceptorChain = [...interceptors.request.handlers];
-    const responseInterceptorChain = [...interceptors.response.handlers];
+    const requestInterceptorChain = requestManager.snapshot();
+    const responseInterceptorChain = responseManager.snapshot();
     // 请求拦截处理
     for (const onFulfilled of requestInterceptorChain) {
       try {
