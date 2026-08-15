@@ -24,7 +24,7 @@
 
 ## 核心工具域（core utilities）
 
-- **取消执行（cancelable execution）**：`cancelable(key, fn, onCancel?)` 包装的异步执行——`cancel(key)` 触发时以 `CancelError` 拒绝执行结果并调用 `onCancel` 清理；执行结束（成功/失败/取消）后取消监听自动清理；未知 key 的 `cancel` 为静默 no-op。取消只丢弃未落定的结果，不阻止已开始的工作函数继续执行（其副作用仍会跑完）。同一 key 的多次并发注册互不感知：`cancel(key)` 广播到该 key 下全部进行中的注册（各自收到 `CancelError`），核心域不做占用告警（告警为请求域行为，见请求域「取消」词条）。请求域的 `abort(key)` 是其在请求场景的应用（另见请求域「取消」词条）。
+- **取消执行（cancelable execution）**：`cancelable(key, fn, onCancel?)` 包装的异步执行——`cancel(key)` 触发时以 `CancelError` 拒绝执行结果并调用 `onCancel` 清理；执行结束（成功/失败/取消）后取消监听自动清理；未知 key 的 `cancel` 为静默 no-op。工作函数经微任务启动，启动前（同一 tick 内）的 `cancel` 使其不再启动、副作用不发生（见 ADR 0023）；已启动的工作不被阻止，继续跑完（结果被丢弃）。同一 key 的多次并发注册互不感知：`cancel(key)` 广播到该 key 下全部进行中的注册（各自收到 `CancelError`），核心域不做占用告警（告警为请求域行为，见请求域「取消」词条）。请求域的 `abort(key)` 是其在请求场景的应用（另见请求域「取消」词条）。
 - **取消错误（CancelError）**：主动取消的标识错误；`instanceof CancelError` 是区分「主动取消」与「真实失败」的唯一依据（请求域中该实例存于结果 `error` 字段）。
 - **异步去重（async deduplication）**：同一去重键的并发调用共享一次执行——第一个调用者为执行者（executor），后续为等待者（waiter）；所有调用者获得同一结果（含失败）；前一次执行结束后，同键的新调用重新执行。`cancelCall(key)` 取消进行中调用时，等待者收到 `CancelError` 拒绝（核心域契约；请求域的去重请求经错误归一化后不拒绝，见请求域「去重」词条）。
 - **去重键（dedup key）**：决定调用是否同组的标识；不同键的调用互不影响。请求域的去重键为全量合并配置的稳定序列化 hash（见请求域「去重」词条）。

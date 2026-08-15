@@ -65,6 +65,33 @@ describe('createCancelable', () => {
 
       await expect(p1).rejects.toBeInstanceOf(CancelError);
     });
+
+    it('同一 tick 内 cancel 后工作函数不应启动（副作用不发生）', async () => {
+      const { cancelable: c, cancel } = createCancelable();
+      const fn = vi.fn(() => Promise.resolve('result'));
+
+      const promise = c('pre-cancel', fn);
+      cancel('pre-cancel');
+
+      await expect(promise).rejects.toBeInstanceOf(CancelError);
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('工作函数启动后 cancel 不阻止其继续执行（副作用仍跑完）', async () => {
+      const { cancelable: c, cancel } = createCancelable();
+      let resolveLater!: (v: string) => void;
+      const fn = vi.fn(() => new Promise<string>((resolve) => { resolveLater = resolve; }));
+
+      const promise = c('mid-cancel', fn);
+      await new Promise<void>((resolve) => { queueMicrotask(resolve); }); // 冲刷微任务：工作函数已启动
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      cancel('mid-cancel');
+      resolveLater('done');
+
+      await expect(promise).rejects.toBeInstanceOf(CancelError);
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('onCancel 回调', () => {

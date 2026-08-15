@@ -69,11 +69,15 @@ function createCancelable() {
    * @returns 返回异步函数的执行结果
    */
   const cancelable = <T>(key: string, asyncFunc: () => T | Promise<T>, onCancel?: () => void) => new Promise<T>((resolve, reject) => {
+    let cancelled = false;
     const off = eventEmitter.once(key, (error) => {
+      cancelled = true;
       reject(error);
       onCancel?.();
     });
-    Promise.resolve().then(() => asyncFunc()).then(resolve, reject).finally(() => off());
+    // 启动前取消（同一 tick 内的 cancel）短路：工作函数不再启动，副作用不发生；
+    // 已启动的工作不被阻止，继续跑完（结果被丢弃）
+    Promise.resolve().then(() => !cancelled && asyncFunc()).then((result) => resolve(result as T), reject).finally(() => off());
   });
 
   /**
