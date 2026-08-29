@@ -13,7 +13,7 @@ pnpm add @purea/utils
 | 模块 | 导入路径 | 用途 |
 |------|----------|------|
 | `createCancelable` | `@purea/utils/core/createCancelable` | 可取消的异步执行（`cancel`/`isPending`/`CancelError`） |
-| `createAsyncDedupe` | `@purea/utils/core/createAsyncDedupe` | 同键并发调用共享一次执行（`asyncDedupe`/`cancelCall`） |
+| `createAsyncDedupe` | `@purea/utils/core/createAsyncDedupe` | 同键并发调用共享一次执行（`asyncDedupe`/`cancelCall`/`isPending`） |
 | `createEventEmitter` | `@purea/utils/core/createEventEmitter` | 类型安全的事件发布/订阅 |
 | `stableStringify` | `@purea/utils/core/stableStringify` | 确定性 JSON 序列化（键排序，供去重键哈希等场景） |
 

@@ -22,8 +22,8 @@ import createEventEmitter from './createEventEmitter';
  * ```
  */
 class CancelError extends Error {
-  constructor(key: string) {
-    super(`${key} async call canceled`);
+  constructor(key: PropertyKey) {
+    super(`${String(key)} async call canceled`);
     this.name = 'CancelError';
   }
 }
@@ -55,7 +55,7 @@ class CancelError extends Error {
  * ```
  */
 function createCancelable() {
-  const eventEmitter = createEventEmitter<{ [key: string]: CancelError }>();
+  const eventEmitter = createEventEmitter<Record<PropertyKey, CancelError>>();
   /**
    * 包装异步函数为可取消执行
    *
@@ -63,12 +63,12 @@ function createCancelable() {
    * 会被拒绝并抛出 `CancelError`。异步函数完成后（成功或失败）自动清理监听器。
    *
    * @typeParam T - 异步函数返回类型
-   * @param key - 取消标识符，与 `cancel(key)` 配对使用
+   * @param key - 取消标识符（string | number | symbol），与 `cancel(key)` 配对使用
    * @param asyncFunc - 要执行的异步函数
    * @param onCancel - 可选，取消时执行的清理回调（如调用底层 API 的 abort）
    * @returns 返回异步函数的执行结果
    */
-  const cancelable = <T>(key: string, asyncFunc: () => T | Promise<T>, onCancel?: () => void) => new Promise<T>((resolve, reject) => {
+  const cancelable = <T>(key: PropertyKey, asyncFunc: () => T | Promise<T>, onCancel?: () => void) => new Promise<T>((resolve, reject) => {
     let cancelled = false;
     const off = eventEmitter.once(key, (error) => {
       cancelled = true;
@@ -82,16 +82,16 @@ function createCancelable() {
 
   /**
    * 取消当前进行中、以该 key 注册的 cancelable 调用
-   * @param key - 取消标识符
+   * @param key - 取消标识符（string | number | symbol）
    */
-  const cancel = (key: string) => eventEmitter.emit(key, new CancelError(key));
+  const cancel = (key: PropertyKey) => eventEmitter.emit(key, new CancelError(key));
 
   /**
    * 检查是否有进行中的取消调用
-   * @param key - 取消标识符
+   * @param key - 取消标识符（string | number | symbol）
    * @returns 是否有进行中的取消调用
    */
-  const isPending = (key: string) => eventEmitter.has(key);
+  const isPending = (key: PropertyKey) => eventEmitter.has(key);
 
   return { cancelable, cancel, isPending };
 }

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - package.json `exports` 为各子路径补显式 `types` 条件（不再依赖 .mjs 兄弟 .d.mts 的隐式解析）
 - 新增回归测试：合并阶段 requestConfig getter 抛错兜底；`cancelCall` 同一 tick 等待者；非去重 keyed 请求同 tick abort 的「已发出」断言（与去重路径语义区分）
 - CONTEXT.md 新增「同 tick 取消的路径差异」词条
+- `createAsyncDedupe` 新增 `isPending(key)` 在途查询
 
 ### Changed
 
@@ -23,10 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI 移除重复的 `test` 步骤（`test:coverage` 已含执行与 95% 阈值门禁）
 - README 补齐公共导出（`buildFullConfig`、`FetchCode`）说明、uni-app 环境说明与开发/本地 lint 版本要求
 - 内部整洁：去重键前缀/哈希种子/HTTP 状态码边界/默认成功码提取为常量；`getStatusCodeMsg` 收窄 `code<0` 分支为 `-3`；`strRepeat` 以原生 `space.repeat` 替换
+- 去重实现改为在途注册表：执行者与等待者共享同一 promise 对象（`p1 === p2` 可观察）；去重与可取消执行的 key 类型放宽为 string | number | symbol
 
 ### Fixed
 
 - CHANGELOG 0.1.0「eslint 配置改为 .mjs 并移除 jiti」与实际不符的勘误（最终为 `eslint.config.ts` + jiti peer）
+- 符号键下 `cancel` 不再抛 TypeError（`CancelError` 消息改用 `String(key)`）
 
 ## [0.1.0] - 2026-08-15
 

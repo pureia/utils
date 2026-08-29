@@ -31,6 +31,7 @@
 | 0022 | 移除外部自定义 logger 注入（0.1.0 发布前移除） | 有效 | 取代 0021 |
 | 0023 | createCancelable 启动前取消短路：工作函数不启动 | 有效 | 对齐 0018（核心原语补齐） |
 | 0024 | createEventEmitter 默认泛型收紧 unknown（约束保留 any） | 有效 | 延伸 0012/0016 的类型卫生立场 |
+| 0025 | createAsyncDedupe 在途注册表与 isPending API（含键放宽） | 有效 | — |
 
 **阅读指引**：
 - 想了解当前生效语义 → 读 [CONTEXT.md](../../CONTEXT.md) 词表，词条已引用对应 ADR 编号。

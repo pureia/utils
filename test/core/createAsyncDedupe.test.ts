@@ -328,6 +328,53 @@ describe('createAsyncDedupe', () => {
     });
   });
 
+  describe('共享 promise 身份', () => {
+    it('执行者与等待者收到同一个 promise 对象，落定后新调用拿到新 promise', async () => {
+      const { asyncDedupe: dedupe } = createAsyncDedupe();
+      let resolveFn!: (value: string) => void;
+      const func1 = vi.fn().mockReturnValue(new Promise<string>(resolve => { resolveFn = resolve; }));
+      const func2 = vi.fn().mockResolvedValue('second-run');
+
+      const p1 = dedupe('identity-key', func1);
+      const p2 = dedupe('identity-key', func1);
+      expect(p1).toBe(p2); // 共享同一 promise 对象（执行者与等待者均不加包装）
+
+      // 冲刷微任务，让共享执行启动（cancelable 经微任务起跑后 resolveFn 才就绪）
+      await new Promise<void>(resolve => queueMicrotask(resolve));
+      resolveFn('first-run');
+      await expect(p2).resolves.toBe('first-run');
+
+      // 前一次执行落定后，相同 key 的新调用是一个新的共享 promise
+      const p3 = dedupe('identity-key', func2);
+      expect(p3).not.toBe(p2);
+      await expect(p3).resolves.toBe('second-run');
+    });
+
+    it.runIf(typeof (globalThis as unknown as { process?: unknown }).process !== 'undefined')('没有任何调用者 await 的失败不触发 unhandledrejection（内部处理器已挂接共享 promise）', async () => {
+      const { asyncDedupe: dedupe } = createAsyncDedupe();
+      // 项目未装 @types/node，经 globalThis 访问 Node 的进程事件（非 Node 环境跳过）
+      const nodeProcess = (globalThis as unknown as {
+        process?: { on: (event: string, listener: () => void) => unknown; off: (event: string, listener: () => void) => unknown };
+      }).process;
+      if (!nodeProcess) return;
+      const onUnhandled = vi.fn();
+      const listener = () => { onUnhandled(); };
+      nodeProcess.on('unhandledRejection', listener);
+      try {
+        dedupe('silent-fail-key', () => Promise.reject(new Error('nobody awaits me')));
+        // 冲刷微任务：内部处理器在 dedupe() 同步期已挂接，拒绝在同一微任务批内被消费（确定性，无需宏任务窗口）
+        await new Promise<void>(resolve => queueMicrotask(resolve));
+      }
+      finally {
+        nodeProcess.off('unhandledRejection', listener);
+      }
+      expect(onUnhandled).not.toHaveBeenCalled();
+      // 共享执行确实失败：失败已被内部处理器消费，同 key 可重新执行
+      const result = await dedupe('silent-fail-key', vi.fn().mockResolvedValue('recovered'));
+      expect(result).toBe('recovered');
+    });
+  });
+
   describe('竞争条件', () => {
     it('真正的微任务竞争：多个同步调用应该只执行一次 asyncFunc', async () => {
       const { asyncDedupe: dedupe } = createAsyncDedupe();
@@ -519,7 +566,6 @@ describe('createAsyncDedupe', () => {
       const symKey = Symbol('test-symbol');
       const func = vi.fn().mockResolvedValue('symbol-result');
 
-      // @ts-expect-error - 测试 Symbol 作为 key 的行为
       const result = await dedupe(symKey, func);
       expect(result).toBe('symbol-result');
     });
@@ -528,7 +574,7 @@ describe('createAsyncDedupe', () => {
       const { asyncDedupe: dedupe } = createAsyncDedupe();
       const func = vi.fn().mockResolvedValue('number-result');
 
-      const result = await dedupe(123 as any, func);
+      const result = await dedupe(123, func);
       expect(result).toBe('number-result');
     });
 
@@ -581,6 +627,47 @@ describe('createAsyncDedupe', () => {
 
       expect(func).toHaveBeenCalledTimes(100);
       expect(results.length).toBe(100);
+    });
+  });
+
+  describe('isPending 功能', () => {
+    it('进行中的 key 返回 true，落定后返回 false', async () => {
+      const { asyncDedupe: dedupe, isPending } = createAsyncDedupe();
+      let resolveFn!: (value: string) => void;
+      const func = vi.fn().mockReturnValue(new Promise<string>(resolve => { resolveFn = resolve; }));
+
+      const promise = dedupe('pending-key', func);
+      expect(isPending('pending-key')).toBe(true);
+
+      // 冲刷微任务，让共享执行启动（cancelable 经微任务起跑后 resolveFn 才就绪）
+      await new Promise<void>(resolve => queueMicrotask(resolve));
+      resolveFn('done');
+      await promise;
+      expect(isPending('pending-key')).toBe(false);
+    });
+
+    it('cancelCall 后：落定前仍在途，落定后恢复 false 且同 key 可重新执行', async () => {
+      const { asyncDedupe: dedupe, cancelCall, isPending } = createAsyncDedupe();
+      let resolveFn!: (value: string) => void;
+      const func = vi.fn().mockReturnValue(new Promise<string>(resolve => { resolveFn = resolve; }));
+
+      const promise = dedupe('cancel-pending-key', func);
+      expect(isPending('cancel-pending-key')).toBe(true);
+
+      await new Promise<void>(resolve => queueMicrotask(resolve)); // 等待 cancelable 注册取消监听
+      cancelCall('cancel-pending-key');
+      expect(isPending('cancel-pending-key')).toBe(true); // 落定前仍在途
+      resolveFn('late');
+      await expect(promise).rejects.toBeInstanceOf(CancelError);
+      expect(isPending('cancel-pending-key')).toBe(false);
+
+      const retry = await dedupe('cancel-pending-key', vi.fn().mockResolvedValue('retry-ok'));
+      expect(retry).toBe('retry-ok');
+    });
+
+    it('未知 key 返回 false', () => {
+      const { isPending } = createAsyncDedupe();
+      expect(isPending('nonexistent-key')).toBe(false);
     });
   });
 
