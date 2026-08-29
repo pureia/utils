@@ -351,7 +351,7 @@ describe('createAsyncDedupe', () => {
     });
 
     it.runIf(typeof (globalThis as unknown as { process?: unknown }).process !== 'undefined')('没有任何调用者 await 的失败不触发 unhandledrejection（内部处理器已挂接共享 promise）', async () => {
-      const { asyncDedupe: dedupe } = createAsyncDedupe();
+      const { asyncDedupe: dedupe, isPending } = createAsyncDedupe();
       // 项目未装 @types/node，经 globalThis 访问 Node 的进程事件（非 Node 环境跳过）
       const nodeProcess = (globalThis as unknown as {
         process?: { on: (event: string, listener: () => void) => unknown; off: (event: string, listener: () => void) => unknown };
@@ -369,7 +369,10 @@ describe('createAsyncDedupe', () => {
         nodeProcess.off('unhandledRejection', listener);
       }
       expect(onUnhandled).not.toHaveBeenCalled();
-      // 共享执行确实失败：失败已被内部处理器消费，同 key 可重新执行
+      // 共享执行确实失败：失败已被内部处理器消费。等待在途注册表清理——落定链路需数个微任务跳，
+      // 未落定前同 key 仍属同一在途执行，此时重执行会共享到旧失败结果
+      await vi.waitFor(() => expect(isPending('silent-fail-key')).toBe(false));
+      // 落定后同 key 可重新执行
       const result = await dedupe('silent-fail-key', vi.fn().mockResolvedValue('recovered'));
       expect(result).toBe('recovered');
     });
