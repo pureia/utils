@@ -1,7 +1,7 @@
 {
   "name": "@purea/utils",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packageManager": "pnpm@10.33.2",
   "description": "小而美的 TypeScript 异步工具：可取消执行、并发去重、类型安全事件、稳定序列化，以及开箱即用的 uni-app 请求封装",
   "author": "Pure Anin <pureanin@gmail.com>",
