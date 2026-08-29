@@ -602,6 +602,20 @@ describe('createAsyncDedupe', () => {
       expect(func).toHaveBeenCalledTimes(1);
     });
 
+    it('cancelCall 应让同一 tick 加入的等待者同样收到 CancelError（无需等待监听器注册）', async () => {
+      const { asyncDedupe, cancelCall } = createAsyncDedupe();
+      const func = vi.fn();
+
+      const p1 = asyncDedupe('waiter-key', func);
+      // 不冲刷微任务：cancelCall 与执行者/等待者注册处于同一 tick（取消短路，func 不应启动）
+      cancelCall('waiter-key');
+      const p2 = asyncDedupe('waiter-key', func);
+
+      await expect(p1).rejects.toBeInstanceOf(CancelError);
+      await expect(p2).rejects.toBeInstanceOf(CancelError);
+      expect(func).not.toHaveBeenCalled();
+    });
+
     it('cancelCall 后相同 key 可以重新请求', async () => {
       const { asyncDedupe, cancelCall } = createAsyncDedupe();
       let resolveLater!: (value: string) => void;

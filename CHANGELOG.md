@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- 发布钩子：`prepublishOnly: pnpm build`（自动构建 `dist`，防止干净 clone 上发布空/陈旧包）
+- `createCancelable` 与 `stableStringify` 补 `default` 导出，5 个工具模块的导出约定统一（命名导出不受影响）
+- package.json `exports` 为各子路径补显式 `types` 条件（不再依赖 .mjs 兄弟 .d.mts 的隐式解析）
+- 新增回归测试：合并阶段 requestConfig getter 抛错兜底；`cancelCall` 同一 tick 等待者；非去重 keyed 请求同 tick abort 的「已发出」断言（与去重路径语义区分）
+- CONTEXT.md 新增「同 tick 取消的路径差异」词条
+
+### Changed
+
+- `createEventEmitter` 无类型参数时默认事件载荷类型 `any` → `unknown`（仅类型层、默认用法）
+- eslint 配置仍为 `eslint.config.ts`：显式声明 `jiti` devDependency（此前仅随 eslint peer 解析），并对 0.1.0 的过期描述补充勘误（见下）
+- tsdown 显式 `target: node18`，与 `engines >=18` 显式对齐
+- CI 移除重复的 `test` 步骤（`test:coverage` 已含执行与 95% 阈值门禁）
+- README 补齐公共导出（`buildFullConfig`、`FetchCode`）说明、uni-app 环境说明与开发/本地 lint 版本要求
+- 内部整洁：去重键前缀/哈希种子/HTTP 状态码边界/默认成功码提取为常量；`getStatusCodeMsg` 收窄 `code<0` 分支为 `-3`；`strRepeat` 以原生 `space.repeat` 替换
+
+### Fixed
+
+- CHANGELOG 0.1.0「eslint 配置改为 .mjs 并移除 jiti」与实际不符的勘误（最终为 `eslint.config.ts` + jiti peer）
+
 ## [0.1.0] - 2026-08-15
 
 ### Added
@@ -30,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `createInterceptorManager` 收敛公共面：拦截器数组私有化，仅暴露 `use`；core 经 `snapshot()` 读取拦截器链快照（调用方无法绕过 `use` 修改拦截器链）
 - package.json 工程补强：新增 `typecheck` 脚本（CI 复用）、`publishConfig.access: public`、exports 补 `./package.json` 子路径
 - CI 工程补强：Node 22/24 版本矩阵（lint 工具链依赖 `Object.groupBy`，要求 Node 21+，Node 18/20 无法运行 lint；`engines >=18` 为运行时契约）；新增 `publint`（包元数据检查）与 `attw`（arethetypeswrong，`esm-only` 模式类型解析检查）两道门禁（新增 devDependencies：`publint`、`@arethetypeswrong/cli`）
-- eslint 配置由 `eslint.config.ts` 改为 `eslint.config.mjs`（纯样板配置，绕开 jiti 转译），移除 `jiti` devDependency
+- ~~eslint 配置由 `eslint.config.ts` 改为 `eslint.config.mjs`（纯样板配置，绕开 jiti 转译），移除 `jiti` devDependency~~（勘误：该条描述的是发布前中途状态；最终 0.1.0 保留 `eslint.config.ts`，`jiti` 当时随 eslint peer 解析、未显式声明，见 [Unreleased]）
 - 测试稳定性：`createAsyncDedupe` 计时/性能断言改用假计时器（消除慢 CI 上的毫秒阈值抖动）；`createAsyncDedupe`/`createCancelable` 测试改为每测试新建实例（消除共享实例的隐藏耦合）；`createFetch` 测试显式 `unstubAllGlobals` 收尾
 - tsconfig 收紧：`noUnusedLocals` / `noUnusedParameters` / `isolatedModules` / `verbatimModuleSyntax`
 - `@purea/eslint-config` 由 `latest` 锁为 `^0.0.6`，保证 CI 可复现

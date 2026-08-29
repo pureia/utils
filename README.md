@@ -31,9 +31,33 @@ await promise.catch((error) => {
 });
 ```
 
+### 其他公共导出
+
+- `buildFullConfig(defaults, requestConfig)`：与 createFetch 内部同源的配置合并函数（公共 API，见 ADR 0013）。合并规则：`header` 按字段深合并（叠加），其余字段请求配置提供即整体替换（数组按引用替换），`rawRequestConfig` 保留请求配置原始引用。
+
+```ts
+import { buildFullConfig } from '@purea/utils';
+
+const defaults = { host: 'https://api.example.com', method: 'GET' as const, header: {}, timeout: 10000, isDedup: false };
+const config = buildFullConfig(defaults, { url: '/users', header: { 'X-Extra': '1' } });
+void config; // header 深合并 => { 'X-Extra': '1' }；rawRequestConfig => 请求配置原引用
+```
+
+- `FetchCode`：请求域哨兵码常量集（`-1` 中止 / `-2` 超时 / `-3` 未知 / `-4` 拦截器或框架错误）。
+
+```ts
+import { FetchCode } from '@purea/utils';
+
+if (!result.ok && result.code === FetchCode.ABORT) { /* 主动取消或传输层中止 */ }
+```
+
+- 类型：`BaseRequestConfig`、`ResponseResult`、`MergedRequestConfig`、`CmpFunc`、`ReplacerFunc`、`StableStringifyOptions`。
+
 ## uni-app 请求工具：createFetch
 
 uni-app 专属，基于全局 `uni.request` 封装。
+
+> ⚠️ `createFetch` 依赖运行时全局 `uni`，仅适用于 uni-app 环境；非 uni 项目请从核心工具子路径导入（如 `@purea/utils/core/createCancelable`），不要从根入口 `@purea/utils` 引入。
 
 ### 快速上手
 
@@ -97,6 +121,18 @@ export interface ResponseResult<R, D> {
 ```
 
 - 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。
+
+## 开发
+
+```bash
+pnpm install
+pnpm dev          # 构建 watch
+pnpm test:watch   # 测试 watch
+pnpm typecheck    # 类型检查
+pnpm lint:check   # lint 检查
+```
+
+> 本地运行 lint 需要 Node 22+（ESLint 工具链依赖 `Object.groupBy`）；`engines` 声明的 `node >=18` 为运行时契约。
 
 ## License
 

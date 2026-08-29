@@ -1,5 +1,5 @@
 import { createEventEmitter } from '@purea/utils';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 定义测试用的事件类型
 interface TestEvents {
@@ -9,10 +9,11 @@ interface TestEvents {
 }
 
 describe('createEventEmitter', () => {
-  const eventEmitter = createEventEmitter<TestEvents>();
+  // 每测试新建实例，与其他工具测试的隔离立场一致（避免共享实例的隐藏耦合）
+  let eventEmitter: ReturnType<typeof createEventEmitter<TestEvents>>;
 
-  afterEach(() => {
-    eventEmitter.clear();
+  beforeEach(() => {
+    eventEmitter = createEventEmitter<TestEvents>();
   });
 
   describe('on/emit', () => {

@@ -44,14 +44,6 @@ interface StableStringifyOptions {
   cycles?: boolean;
 }
 
-function strRepeat(n: number, char: string): string {
-  let str = '';
-  for (let i = 0; i < n; i++) {
-    str += char;
-  }
-  return str;
-}
-
 /**
  * 确定性版本的 JSON.stringify —— 对对象 key 排序后序列化，确保相同内容产生一致字符串。
  *
@@ -132,7 +124,7 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
   const seen = new Set<object>();
 
   function stringify(parent: any, key: string | number, node: any, level: number): string | undefined {
-    const indent = space ? `\n${strRepeat(level, space)}` : '';
+    const indent = space ? `\n${space.repeat(level)}` : '';
     const colonSeparator = space ? ': ' : ':';
 
     if (node && typeof node.toJSON === 'function') {
@@ -194,3 +186,5 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
 
 export { stableStringify };
 export type { CmpFunc, ReplacerFunc, StableStringifyOptions };
+
+export default stableStringify;

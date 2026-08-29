@@ -40,6 +40,19 @@ const FetchCode = {
   INTERCEPTOR: -4,
 } as const;
 
+/** 去重键前缀：区分去重键取值空间（普通前缀字符串即可，语义稳定即可） */
+const DEDUP_KEY_PREFIX = 'Request:';
+/** 视为有效的 HTTP 状态码范围（含边界）：仅 100-599 透传，其余走哨兵归一路径 */
+const MIN_HTTP_STATUS = 100;
+const MAX_HTTP_STATUS = 599;
+/** 默认视为成功的 HTTP 状态码（successStatusCodes 缺省时）；只读数组，作为共享默认值不可被外部修改 */
+const DEFAULT_SUCCESS_CODES: readonly number[] = [200];
+/** simpleHash 双哈希参数（种子/乘数取自常见双哈希实现，保证 32 位 x 2 的混合分布） */
+const HASH_SEED_H1 = 0xDEADBEEF;
+const HASH_SEED_H2 = 0x41C6CE57;
+const HASH_MULT_H1 = 2654435761;
+const HASH_MULT_H2 = 1597334677;
+
 /**
  * 统一响应结果
  *
@@ -165,11 +178,11 @@ function getErrorMessage(error: unknown): string {
  * @returns 十六进制哈希值
  */
 function simpleHash(str: string): string {
-  let h1 = 0xDEADBEEF; let h2 = 0x41C6CE57;
+  let h1 = HASH_SEED_H1; let h2 = HASH_SEED_H2;
   for (let i = 0; i < str.length; i++) {
     const ch = str.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h1 = Math.imul(h1 ^ ch, HASH_MULT_H1);
+    h2 = Math.imul(h2 ^ ch, HASH_MULT_H2);
   }
   return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
 }
@@ -190,7 +203,7 @@ function simpleHash(str: string): string {
  */
 function getStatusCode(code?: number | null, defaultMsg?: string) {
   // 仅 100-599 视为有效 HTTP 状态；1-99 的异常正数同样归一，不透传
-  if (code && code >= 100 && code < 600) return code;
+  if (code && code >= MIN_HTTP_STATUS && code <= MAX_HTTP_STATUS) return code;
   if (defaultMsg?.startsWith('request:fail abort')) return FetchCode.ABORT;
   if (defaultMsg?.startsWith('request:fail timeout')) return FetchCode.TIMEOUT;
   return FetchCode.UNKNOWN;
@@ -259,7 +272,8 @@ const HTTP_STATUS_TEXT: Record<number, string> = {
 function getStatusCodeMsg(code: number, defaultMsg?: string) {
   if (code === FetchCode.ABORT) return 'Request Abort';
   if (code === FetchCode.TIMEOUT) return 'Request Timeout';
-  if (code < 0) return defaultMsg ?? 'Unknown Msg';
+  // 仅 -3（未知）回退原始 errMsg：-4 的 msg 由 normalizeError 直接取抛出的业务消息，不经本函数
+  if (code === FetchCode.UNKNOWN) return defaultMsg ?? 'Unknown Msg';
   return HTTP_STATUS_TEXT[code] ?? `HTTP ${code}`;
 }
 
@@ -464,7 +478,7 @@ function createFetch<R extends BaseRequestConfig>(
           } = result as UniApp.GeneralCallbackResult & UniApp.RequestSuccessCallbackResult;
 
           const statusCode = getStatusCode(code, msg);
-          const ok = (fullRequestConfig.successStatusCodes ?? [200]).includes(statusCode);
+          const ok = (fullRequestConfig.successStatusCodes ?? DEFAULT_SUCCESS_CODES).includes(statusCode);
           const responseMsg = getStatusCodeMsg(statusCode, msg);
 
           const baseResponse = {
@@ -587,7 +601,7 @@ function createFetch<R extends BaseRequestConfig>(
 
     let dedupKey: string;
     try {
-      dedupKey = `Request:${simpleHash(stableStringify(fullRequestConfig)!)}`;
+      dedupKey = `${DEDUP_KEY_PREFIX}${simpleHash(stableStringify(fullRequestConfig)!)}`;
     }
     catch (error) {
       // hash 阶段同步异常（如 data 含循环引用）：归一化为失败结果

@@ -22,6 +22,8 @@
 - **拦截器与失败结果的边界（interceptor/failure boundary）**：响应拦截器链能看到的结果子集——传输层失败（`-1` 平台中止 / `-2` 超时 / `-3` 未知，未带用户 key 或用户未 abort 时）与 HTTP 错误（含业务错误）的结果会进入响应拦截器链；用户主动 `abort`（含去重起跑前短路）与框架错误（`uni.request` 同步抛错）的结果直接返回调用方、跳过响应链；拦截器抛错处链条中断，后续拦截器不再执行。同是 `code: -1`，传输层中止进链、用户取消不进链（见 ADR 0020）。
 - **告警（warning）**：库内的尽力而为诊断输出——key 占用提示（见「取消」）、拦截器非法返回值提示（见「拦截器返回值校验」）。告警不提供注入接管（曾有的外部 `logger` 注入已随 ADR 0022 移除），不影响任何请求结果。
 
+- **同 tick 取消的路径差异（same-tick abort asymmetry）**：`abort(key)` 与 `request()` 处于同一 tick 时，去重路径经取消意向（见 ADR 0018）短路共享执行——请求不发出、整组统一为 `-1`；非去重 keyed 请求则分两种：无请求拦截器时 `uni.request` 已在 `request()` 同步栈内发出，同 tick abort 只能随后中止传输层（`requestTask.abort()`）；有请求拦截器时取消发生在拦截器阶段，网络层未发出。三种路径结果均为 `code: -1` 且 `error` 为 `CancelError` 实例，区别仅在网络层是否曾发出。
+
 ## 核心工具域（core utilities）
 
 - **取消执行（cancelable execution）**：`cancelable(key, fn, onCancel?)` 包装的异步执行——`cancel(key)` 触发时以 `CancelError` 拒绝执行结果并调用 `onCancel` 清理；执行结束（成功/失败/取消）后取消监听自动清理；未知 key 的 `cancel` 为静默 no-op。工作函数经微任务启动，启动前（同一 tick 内）的 `cancel` 使其不再启动、副作用不发生（见 ADR 0023）；已启动的工作不被阻止，继续跑完（结果被丢弃）。同一 key 的多次并发注册互不感知：`cancel(key)` 广播到该 key 下全部进行中的注册（各自收到 `CancelError`），核心域不做占用告警（告警为请求域行为，见请求域「取消」词条）。请求域的 `abort(key)` 是其在请求场景的应用（另见请求域「取消」词条）。

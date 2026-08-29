@@ -21,15 +21,39 @@
   ],
   "sideEffects": false,
   "exports": {
-    ".": "./dist/index.mjs",
-    "./core": "./dist/core/index.mjs",
-    "./core/createAsyncDedupe": "./dist/core/createAsyncDedupe.mjs",
-    "./core/createCancelable": "./dist/core/createCancelable.mjs",
-    "./core/createEventEmitter": "./dist/core/createEventEmitter.mjs",
-    "./core/stableStringify": "./dist/core/stableStringify.mjs",
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.mts",
+      "import": "./dist/core/index.mjs"
+    },
+    "./core/createAsyncDedupe": {
+      "types": "./dist/core/createAsyncDedupe.d.mts",
+      "import": "./dist/core/createAsyncDedupe.mjs"
+    },
+    "./core/createCancelable": {
+      "types": "./dist/core/createCancelable.d.mts",
+      "import": "./dist/core/createCancelable.mjs"
+    },
+    "./core/createEventEmitter": {
+      "types": "./dist/core/createEventEmitter.d.mts",
+      "import": "./dist/core/createEventEmitter.mjs"
+    },
+    "./core/stableStringify": {
+      "types": "./dist/core/stableStringify.d.mts",
+      "import": "./dist/core/stableStringify.mjs"
+    },
     "./package.json": "./package.json",
-    "./uniapp": "./dist/uniapp/index.mjs",
-    "./uniapp/createFetch": "./dist/uniapp/createFetch.mjs"
+    "./uniapp": {
+      "types": "./dist/uniapp/index.d.mts",
+      "import": "./dist/uniapp/index.mjs"
+    },
+    "./uniapp/createFetch": {
+      "types": "./dist/uniapp/createFetch.d.mts",
+      "import": "./dist/uniapp/createFetch.mjs"
+    }
   },
   "types": "./dist/index.d.mts",
   "files": [
@@ -46,6 +70,7 @@
     "dev": "tsdown --watch",
     "lint": "eslint --fix .",
     "lint:check": "eslint .",
+    "prepublishOnly": "pnpm build",
     "typecheck": "tsc --noEmit",
     "publint": "publint",
     "attw": "attw --pack . --profile esm-only",
@@ -59,6 +84,7 @@
     "@purea/eslint-config": "^0.0.6",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.39.4",
+    "jiti": "^2.6.1",
     "publint": "^0.3.23",
     "tsdown": "^0.22.12",
     "typescript": "^5.9.3",

@@ -97,3 +97,5 @@ function createCancelable() {
 }
 
 export { CancelError, createCancelable };
+
+export default createCancelable;

@@ -41,7 +41,7 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * emitter.emit('count', 2); // 无输出（已自动取消）
  * ```
  */
-function createEventEmitter<E extends Record<string, any> = Record<string, any>>(
+function createEventEmitter<E extends Record<string, any> = Record<string, unknown>>(
   options?: { onError?: (key: EventKey<E>, error: unknown) => void }
 ) {
   const store = new Map<EventKey<E>, Set<(result: E[EventKey<E>]) => void>>();
