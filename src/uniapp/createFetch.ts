@@ -467,9 +467,7 @@ function createFetch<R extends BaseRequestConfig>(
       });
     });
 
-    return key
-      ? cancelable(key, () => responsePromise, { onCancel: () => requestTask?.abort() })
-      : responsePromise;
+    return key ? cancelable(key, () => responsePromise, { onCancel: () => requestTask?.abort() }) : responsePromise;
   };
 
   /**
