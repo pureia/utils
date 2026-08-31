@@ -4,16 +4,12 @@ import { CancelError, createAsyncDedupe, createCancelable, createEventEmitter, s
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
 
 /**
- * 基本请求配置
- *
- * 定义每次请求的默认参数，通过 `createFetch` 的 `getOriginalRequestConfig` 参数传入。
+ * 基本请求配置：每次请求的默认参数，经 `createFetch` 的 `getOriginalRequestConfig` 传入。
  */
 interface BaseRequestConfig {
-  /** 主机地址，会与请求 url 拼接为完整请求地址 */
+  /** 主机地址，与请求 url 拼接为完整地址 */
   host: string;
-  /** 请求方法类型 */
   method: FetchMethod;
-  /** 请求头 */
   header: Record<string, string>;
   /** 超时时间（单位：毫秒） */
   timeout: number;
@@ -24,15 +20,12 @@ interface BaseRequestConfig {
 }
 
 /**
- * 非 HTTP 的传输/流程错误码（哨兵码）
- *
- * 与 HTTP 状态码共同构成 `code` 的取值空间：
- * 成功 = 配置的成功状态码（默认 200）；失败 = 其余 HTTP 码或哨兵码。
+ * 非 HTTP 的传输/流程错误码（哨兵码），与 HTTP 状态码共同构成 `code` 的取值空间。
  */
 const FetchCode = {
-  /** 请求被中止（主动 abort 或传输层中止） */
+  /** 中止（主动取消或传输层中止；二者共用哨兵码，用 `error instanceof CancelError` 区分） */
   ABORT: -1,
-  /** 请求超时 */
+  /** 超时 */
   TIMEOUT: -2,
   /** 未知错误 */
   UNKNOWN: -3,
@@ -54,13 +47,9 @@ const HASH_MULT_H1 = 2654435761;
 const HASH_MULT_H2 = 1597334677;
 
 /**
- * 统一响应结果
- *
- * 所有请求路径（成功、传输错误、HTTP 错误、业务错误、取消）的公共出口，
- * 调用方无需 try/catch：`ok` 判成败、`code` 区分失败类别。
- *
- * 注：`ok` 为普通 boolean，不再收窄 `data`——成功时业务上 `data` 非空，
- * 但类型上恒为 `D | null`，需要时由调用方按 `ok` 自行断言。
+ * 统一响应结果：所有路径（成功/传输错误/HTTP 错误/业务错误/取消）的公共出口，
+ * 调用方无需 try/catch——`ok` 判成败、`code` 区分失败类别；`ok` 为普通 boolean
+ * 不收窄 `data`（恒为 `D | null`），需要时自行断言。
  *
  * @typeParam R - 完整请求配置类型
  * @typeParam D - 响应数据类型
@@ -72,15 +61,12 @@ interface ResponseResult<R, D> {
   code: number;
   /** 状态码描述 */
   msg: string;
-  /** 响应头 */
   header: Record<string, string>;
-  /** cookies */
   cookies: string[];
-  /** 请求配置信息 */
   requestConfig: R;
   /** 响应数据，失败时可能为空；拦截器错误时保留响应现场。类型恒为 `D | null`，成功时按需按 `ok` 断言 */
   data: D | null;
-  /** 原始错误对象：拦截器抛错与主动取消（CancelError 实例）时存在；HTTP 错误与传输失败（超时/网络中止/未知错误）时为 undefined。区分主动取消与传输层中止可对 `error` 做 `instanceof CancelError`（该类由 `@purea/utils/core/createCancelable` 导入，本模块不再转出） */
+  /** 原始错误：拦截器抛错与主动取消时存在（CancelError 实例）；HTTP 错误与传输失败时为 undefined。用 `instanceof CancelError` 区分主动取消与传输层中止 */
   error?: unknown;
 }
 
@@ -114,11 +100,8 @@ type RequestConfigLike<R extends BaseRequestConfig> = Omit<Partial<R>, 'method' 
 };
 
 /**
- * 默认配置与请求配置合并后的完整配置（`buildFullConfig` 的返回类型）
- *
- * 为 Omit 形态：请求配置提供的字段整体替换为请求配置的类型（含 `rawRequestConfig` 原始引用、
- * 深合并后的 `header`）。与请求实例内的 `FullRequestConfig`（交集形态，由 defaults 补齐必填字段）
- * 语义不同——本类型对"必填型请求配置"调用方给出更精确的合并结果。
+ * 默认配置与请求配置合并后的完整配置（`buildFullConfig` 的返回类型）。
+ * 请求配置提供的字段整体替换（含 `rawRequestConfig` 原始引用与深合并后的 `header`）。
  */
 type MergedRequestConfig<
   R extends BaseRequestConfig,
@@ -126,30 +109,20 @@ type MergedRequestConfig<
 > = Omit<R, keyof RC> & RC & { readonly rawRequestConfig: RC; header: Record<string, string> };
 
 /**
- * 合并默认配置与请求配置为完整请求配置
+ * 合并默认配置与请求配置为完整配置：除 `header` 按字段深合并（叠加）外，
+ * 其余字段请求配置提供即整体替换（数组按引用替换）；`rawRequestConfig` 保留原始引用。
  *
- * 合并规则：`header` 按字段深合并（叠加）；其余字段请求配置提供即整体替换
- * （数组按引用替换，不做索引合并）；`rawRequestConfig` 保留请求配置原始引用。
- * 本函数为纯同步合并，同步抛错（如属性 getter）由调用方 try/catch 兜底。
- *
- * @typeParam R - 默认配置类型，需继承 `BaseRequestConfig`
+ * @typeParam R - 默认配置类型（需继承 `BaseRequestConfig`）
  * @typeParam RC - 请求配置类型（默认配置的部分覆盖 + url/data/key 扩展）
  * @param defaults - 默认配置
- * @param requestConfig - 请求配置（url 为必填）
- * @returns 合并后的完整配置（MergedRequestConfig）
+ * @param requestConfig - 请求配置（url 必填）
+ * @returns 合并后的完整配置
+ * @throws 合并可能同步抛错（如属性 getter），由调用方 try/catch 兜底
  *
  * @example
  * ```ts
- * const defaults = {
- *   host: 'https://api.example.com',
- *   method: 'GET' as const,
- *   header: { 'Content-Type': 'application/json' },
- *   timeout: 10000,
- *   isDedup: false,
- * };
  * const config = buildFullConfig(defaults, { url: '/users', header: { Authorization: 'Bearer t' } });
- * // header 深合并 => { 'Content-Type': 'application/json', Authorization: 'Bearer t' }
- * // rawRequestConfig 保留请求配置原始引用；method/timeout 等其余字段来自 defaults
+ * // header 深合并 => 与 defaults.header 叠加；rawRequestConfig => 请求配置原引用
  * ```
  */
 export function buildFullConfig<
@@ -323,58 +296,23 @@ function createInterceptorManager<C>() {
 }
 
 /**
- * 创建一个 UniApp 请求实例，支持拦截器、请求去重和请求取消。
+ * 创建请求实例：基于 `uni.request`，所有路径（传输错误、HTTP 错误、拦截器抛出、
+ * 主动取消）都归一化为带 `code` 的失败结果，调用方无需 try/catch。
+ * 通过 `getOriginalRequestConfig` 提供默认配置，每次请求可部分覆盖。
  *
- * 基于 `uni.request` 封装，提供请求/响应拦截器、自动请求去重、请求任务管理等功能。
- * 所有请求错误（传输错误、HTTP 错误、拦截器抛出的业务错误、主动取消）都会被
- * 归一化为带 `code` 的正常返回，调用方无需 try/catch。
- * 通过 `getOriginalRequestConfig` 传入默认配置，每次请求时可覆盖部分配置。
- *
- * @typeParam R - 基础请求配置类型，需继承 `BaseRequestConfig`
- * @param getOriginalRequestConfig - 获取默认请求配置的函数，每次请求时调用以获取基础配置
- * @returns 请求实例，包含以下方法：
- *   - `request(config)` - 发送请求
- *   - `get(config)` - 发送 GET 请求
- *   - `post(config)` - 发送 POST 请求
- *   - `put(config)` - 发送 PUT 请求
- *   - `delete(config)` - 发送 DELETE 请求
- *   - `interceptors` - 拦截器管理（request / response）
- *   - `abort(key)` - 通过请求 key 取消请求
+ * @typeParam R - 基础请求配置类型（需继承 `BaseRequestConfig`）
+ * @param getOriginalRequestConfig - 获取默认配置的函数，每次请求时调用
+ * @returns 请求实例：`request`/`get`/`post`/`put`/`delete`（发送请求，后四者自动设置 method）、
+ *   `interceptors`（request/response 拦截器，返回值经形状校验、抛错归一化收口）、`abort(key)`（按 key 取消）
  *
  * @example
  * ```ts
- * const fetch = createFetch(() => ({
- *   host: 'https://api.example.com',
- *   method: 'GET',
- *   header: { 'Content-Type': 'application/json' },
- *   timeout: 10000,
- *   isDedup: false,
- *   successStatusCodes: [200],
- * }));
- *
- * // 基本请求：永不 reject，判断 ok 即可
+ * const fetch = createFetch(() => ({ host: 'https://api.example.com', method: 'GET', header: {}, timeout: 10000, isDedup: false }));
+ * // 永不 reject，判断 ok 即可；ok 不收窄 data，按需断言
  * const result = await fetch.get<{ id: number }>({ url: '/users/1' });
- * if (result.ok) {
- *   // ok 为普通 boolean，不自动收窄 data：成功时业务上非空，按需断言
- *   console.log(result.data!.id); // 1
- * } else {
- *   console.log(result.code, result.msg); // 失败码与描述
- * }
- *
- * // 添加请求拦截器（如添加认证头）
- * fetch.interceptors.request.use((config) => {
- *   config.header.Authorization = 'Bearer token';
- *   return config;
- * });
- *
- * // 添加响应拦截器（如统一业务错误处理：抛出后会被归一化）
- * fetch.interceptors.response.use((response) => {
- *   if (!response.ok) throw new Error(response.msg);
- *   return response;
- * });
- *
- * // 取消请求：归一化为 code: -1，无需捕获
- * fetch.request({ url: '/users', method: 'GET', key: 'user-list' });
+ * if (result.ok) console.log(result.data!.id);
+ * else console.log(result.code, result.msg);
+ * fetch.request({ url: '/users', key: 'user-list' }); // 取消时归一化为 code: -1
  * fetch.abort('user-list');
  * ```
  */
@@ -584,17 +522,14 @@ function createFetch<R extends BaseRequestConfig>(
   };
 
   /**
-   * 发送请求，自动合并默认配置和请求配置（合并规则见 `buildFullConfig`）
+   * 发送请求：自动合并默认配置与请求配置（规则见 `buildFullConfig`）
    *
-   * 同步兜底：配置合并与去重 hash 计算可能同步抛错（如 `data` 含循环引用时
-   * `stableStringify` 抛 TypeError），统一归一化为 `code: -4` 失败结果，保持"永不 reject 且
-   * 永不同步 throw"。
-   *
-   * 去重取消（整组）：`isDedup` 开启时，共享执行透传用户 key，`abort(key)` 中止整个去重组
-   * 的共享执行（拦截器/传输层），执行者与所有等待者统一收到 `code: -1`。
+   * 永不 reject、永不同步抛错——合并与去重键 hash 阶段的同步异常（如 `data` 含循环引用）
+   * 同样归一化为 `code: -4`。`isDedup` 开启时 `abort(key)` 中止整组
+   * （执行者与所有等待者统一收到 `-1`）。
    *
    * @typeParam D - 响应数据类型
-   * @param requestConfig - 请求配置（url 为必填）
+   * @param requestConfig - 请求配置（url 必填）
    * @returns 响应结果 Promise
    */
   const request = <D = unknown>(requestConfig: RequestConfig): Promise<ResponseResult<FullRequestConfig, D>> => {
@@ -634,33 +569,27 @@ function createFetch<R extends BaseRequestConfig>(
 
   return {
     /**
-     * 通过请求 key 取消请求
-     *
-     * 按 key 广播：同一 key 下所有进行中的注册（拦截器阶段与传输层）
-     * 统一归一化为 `code: -1`；并发请求间应保证 key 唯一，否则互为取消组。
-     * 取消只丢弃未落定的结果，不打断已进入的拦截器代码执行（其副作用仍会跑完）；
-     * 未知 key 的 abort 为静默 no-op（请求完成后对旧 key 的兜底取消是合法用法）。
+     * 按 key 取消请求：key 下所有进行中的注册（拦截器阶段与传输层）统一归一化为
+     * `code: -1`；未知 key 为静默 no-op。取消只丢弃未落定的结果，不打断已进入的
+     * 拦截器代码执行；并发请求间应保证 key 唯一，否则互为取消组。
      */
     abort(key: string) {
       cancel(key); // 执行期取消（拦截器/传输层，现有路径）
       cancelIntentEmitter.emit(key, new CancelError(key)); // 起跑前取消（新路径）
     },
     /**
-     * 拦截器管理器，包含 request（请求拦截）和 response（响应拦截）
-     *
-     * - request：处理完整请求配置（FullRequestConfig），返回值经运行时形状校验（url+host）；
-     * - response：处理统一响应结果（ResponseResult），返回值经运行时形状校验（ok/code）；
-     * - 拦截器抛错由错误归一化收口（CancelError → -1，其余 → -4），无恢复语义。
-     * - 改写边界：`header` 为每次请求合并出的新对象可安全改写；`rawRequestConfig` 与 `data`
-     *   为调用方原始引用，改写会泄漏到调用方对象，不应修改。
+     * 拦截器管理器：`request` 处理完整请求配置、`response` 处理统一响应结果；
+     * 返回值经运行时形状校验，非法时告警并沿用上一值；抛错被归一化收口
+     * （`CancelError` → `-1`，其余 → `-4`）。`header` 为合并副本可安全改写，
+     * `rawRequestConfig` 与 `data` 为调用方原始引用，不应修改。
      */
     interceptors,
     /** 发送请求，method 由请求配置决定；配置合并与去重取消规则见 request 定义处 */
     request,
     /**
-     * 发送 GET 请求
+     * 发送 GET 请求（method 自动设为 'GET'）
      * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'GET'）
+     * @param requestConfig - 快捷请求配置（无需提供 method）
      * @returns 响应结果 Promise
      */
     get<D = unknown>(requestConfig: ShortcutRequestConfig) {
@@ -668,27 +597,27 @@ function createFetch<R extends BaseRequestConfig>(
       return request<D>({ ...requestConfig, method: 'GET' } as RequestConfig);
     },
     /**
-     * 发送 POST 请求
+     * 发送 POST 请求（method 自动设为 'POST'）
      * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'POST'）
+     * @param requestConfig - 快捷请求配置（无需提供 method）
      * @returns 响应结果 Promise
      */
     post<D = unknown>(requestConfig: ShortcutRequestConfig) {
       return request<D>({ ...requestConfig, method: 'POST' } as RequestConfig);
     },
     /**
-     * 发送 PUT 请求
+     * 发送 PUT 请求（method 自动设为 'PUT'）
      * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'PUT'）
+     * @param requestConfig - 快捷请求配置（无需提供 method）
      * @returns 响应结果 Promise
      */
     put<D = unknown>(requestConfig: ShortcutRequestConfig) {
       return request<D>({ ...requestConfig, method: 'PUT' } as RequestConfig);
     },
     /**
-     * 发送 DELETE 请求
+     * 发送 DELETE 请求（method 自动设为 'DELETE'）
      * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method，自动设为 'DELETE'）
+     * @param requestConfig - 快捷请求配置（无需提供 method）
      * @returns 响应结果 Promise
      */
     delete<D = unknown>(requestConfig: ShortcutRequestConfig) {

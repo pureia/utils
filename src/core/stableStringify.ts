@@ -32,67 +32,42 @@ type CmpFunc = (
 type ReplacerFunc = (this: any, parent: any, key: string | number, value: any) => any;
 
 /**
- * `stableStringify` 选项
- *
- * 所有字段可选；未提供的选项按原生 `JSON.stringify` 的默认语义处理。
+ * `stableStringify` 选项；未提供的字段按原生 `JSON.stringify` 的默认语义处理。
  */
 interface StableStringifyOptions {
   /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元 */
   space?: string | number;
-  /**
-   * 自定义 key 排序比较函数。
-   * 接收 `{ key, value }` 对，返回负数/0/正数决定排序。
-   * 也可以直接传比较函数作为第二个参数（兼容调用方式）。
-   */
+  /** 自定义 key 排序比较函数；也可直接传比较函数作为第二个参数 */
   cmp?: CmpFunc;
-  /** 类似 JSON.stringify 的 replacer 函数 */
+  /** 过滤/转换函数，返回 `undefined` 跳过该属性 */
   replacer?: ReplacerFunc;
-  /** 是否将循环引用序列化为 `"__cycle__"` 而非抛错，默认 false */
+  /** 将循环引用序列化为 `"__cycle__"` 而非抛错，默认 false */
   cycles?: boolean;
 }
 
 /**
- * 确定性版本的 JSON.stringify —— 对对象 key 排序后序列化，确保相同内容产生一致字符串。
+ * 确定性版本的 `JSON.stringify`：对象键按 UTF-16 码点排序，相同内容恒产出相同字符串。
  *
- * 与原生 `JSON.stringify` 的核心区别：
- * - 对象 key 按字母序（UTF-16 码点）输出，而非插入顺序
- * - `replacer` 签名为 `(parent, key, value)`，第一个参数是父对象（替代了原生的 `this` 绑定）
- * - 支持 `cycles` 选项将循环引用序列化为 `"__cycle__"` 而非抛错
- * - 空容器（{} / []）恒紧凑输出，与原生一致
- * - 类数组的整数键（如 `"2"`/`"10"`）不按数值优先排序（原生会将其排在最前），
- *   与其余键统一按码点序排序；确定性不受影响，但跨工具哈希比对时需注意
+ * 与原生 `JSON.stringify` 的可观察差异：
+ * - `replacer` 签名为 `(parent, key, value)`，第一个参数是父对象（替代原生的 `this` 绑定）
+ * - `cycles: true` 时将循环引用序列化为 `"__cycle__"` 而非抛错
+ * - 类数组整数键（如 `"2"`/`"10"`）不按数值优先排序（原生会将其排在最前），
+ *   与其余键统一按码点序排序——确定性不受影响，但跨工具哈希比对时需注意
  *
  * @param obj - 要序列化的值
- * @param opts - 选项对象，或直接传入 `CmpFunc` 比较函数作为第二个参数
- * @param opts.space - 缩进，对齐原生 JSON.stringify：数字截断（ToIntegerOrInfinity）后钳制到 [0, 10]（负数/NaN → 无缩进），字符串仅取前 10 个码元；不传则输出紧凑格式
- * @param opts.cmp - 自定义 key 排序比较函数，签名 `({ key, value }, { key, value }, getter?) => number`
- * @param opts.replacer - 过滤/转换函数，签名 `(parent, key, value) => any`，返回 `undefined` 跳过该属性
- * @param opts.cycles - 为 `true` 时将循环引用序列化为 `"__cycle__"`，默认 `false` 则抛出 `TypeError`
- * @returns 稳定的 JSON 字符串；当顶层值为 `undefined` 时返回 `undefined`
- * @throws {TypeError} 遇到循环引用且 `cycles` 未启用时抛出
+ * @param opts - 选项对象，或直接传 `CmpFunc` 作为第二个参数
+ * @returns 稳定的 JSON 字符串；顶层值为 `undefined` 时返回 `undefined`
+ * @throws {TypeError} 遇循环引用且 `cycles` 未启用时
  *
  * @example
  * // 基本排序
- * const obj = { c: 8, b: [{ z: 6, y: 5, x: 4 }, 7], a: 3 };
- * stableStringify(obj);
- * // => '{"a":3,"b":[{"x":4,"y":5,"z":6},7],"c":8}'
- *
- * @example
- * // 自定义排序（按 value 降序）
- * stableStringify({ a: 1, b: 3, c: 2 }, (a, b) => b.value - a.value);
- * // => '{"b":3,"c":2,"a":1}'
- *
- * @example
+ * stableStringify({ c: 8, b: [{ z: 6 }, 7], a: 3 });
+ * // => '{"a":3,"b":[{"z":6},7],"c":8}'
  * // 循环引用处理
  * const obj: any = { a: 1 };
  * obj.self = obj;
  * stableStringify(obj, { cycles: true });
  * // => '{"a":1,"self":"__cycle__"}'
- *
- * @example
- * // pretty-print 模式
- * stableStringify({ a: 1, b: 2 }, { space: 2 });
- * // => '{\n  "a": 1,\n  "b": 2\n}'
  */
 function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
   const isObj = opts != null && typeof opts === 'object';

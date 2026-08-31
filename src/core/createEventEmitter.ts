@@ -8,74 +8,45 @@ type EventPayload<T, K extends EventKey<T>> = T[K];
 type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
 
 /**
- * 创建一个类型安全的事件发射器实例，用于事件的发布/订阅管理。
+ * 创建一个类型安全的事件发射器：`on` 持续订阅、`once` 一次性订阅、`emit` 广播，
+ * 所有事件键与载荷均类型安全；处理器抛错被捕获并输出到 `console.error`，
+ * 不影响其余处理器；订阅返回取消订阅函数。
  *
- * 支持 `on` 持续订阅和 `once` 一次性订阅，所有事件键和载荷均为类型安全。
- * 同一事件可注册多个处理程序，处理程序中的错误会被捕获并输出到 `console.error`，
- * 不会影响其他处理程序的执行。
- * 订阅函数会返回取消订阅函数，方便在组件卸载时清理。
- *
- * @typeParam E - 事件定义对象，键为事件名，值为事件载荷类型
- * @returns 事件发射器实例
+ * @typeParam E - 事件定义对象，键为事件名、值为事件载荷类型
+ * @returns 事件发射器实例（keys/has/delete/clear/off/on/once/emit）
  *
  * @example
  * ```ts
- * interface Events {
- *   message: string;
- *   count: number;
- * }
- *
+ * interface Events { message: string; count: number }
  * const emitter = createEventEmitter<Events>();
- *
- * // 订阅事件
  * const unsubscribe = emitter.on('message', (msg) => console.log(msg));
  * emitter.emit('message', 'hello'); // 输出: hello
- *
- * // 取消订阅
- * unsubscribe();
- *
- * // 一次性订阅
+ * unsubscribe(); // 取消订阅（未输出）
  * emitter.once('count', (n) => console.log(n));
- * emitter.emit('count', 1); // 输出: 1
- * emitter.emit('count', 2); // 无输出（已自动取消）
+ * emitter.emit('count', 1); // 输出: 1（只触发一次）
  * ```
  */
 function createEventEmitter<E extends Record<string, any> = Record<string, unknown>>() {
   const store = new Map<EventKey<E>, Set<(result: E[EventKey<E>]) => void>>();
 
-  /**
-   * 获取所有已注册的事件键
-   * @returns 事件键迭代器
-   */
+  /** 所有已注册的事件键 */
   const keys = (): IterableIterator<EventKey<E>> => store.keys();
 
-  /**
-   * 检查指定事件是否已注册监听器
-   * @param key - 事件键
-   * @returns 是否存在监听器
-   */
+  /** 指定事件是否已注册监听器 */
   const has = <K extends EventKey<E>>(key: K) => store.has(key);
 
-  /**
-   * 删除指定事件及其所有处理程序
-   * @param key - 事件键
-   * @returns 是否成功删除
-   */
+  /** 删除指定事件及其全部处理程序 */
   const remove = <K extends EventKey<E>>(key: K) => store.delete(key);
 
-  /**
-   * 清空所有事件及其处理程序
-   */
+  /** 清空全部事件与处理程序 */
   function clear() { store.clear(); }
 
   /**
-   * 取消指定事件的处理程序
-   *
-   * 推荐使用 `on()` 返回的取消订阅函数来移除处理程序，无需持有原始 handler 引用。
-   * 仅在需要外部精确移除特定 handler 时使用此方法（需持有原始 handler 引用）。
+   * 按引用移除指定处理程序（引用须与注册时一致）；一般推荐用 `on()`/`once()`
+   * 返回的取消订阅函数，无需持有 handler 引用。
    *
    * @param key - 事件键
-   * @param handler - 要取消的处理程序（必须与注册时传入的引用相同）
+   * @param handler - 注册时传入的处理程序
    */
   function off<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>) {
     const handlers = store.get(key);
@@ -110,11 +81,11 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
   }
 
   /**
-   * 发布事件，通知所有订阅了该事件的处理程序
+   * 广播事件给全部订阅者
    *
-   * 处理程序中的错误会被捕获并输出到 `console.error`，不影响其余处理程序的执行；
-   * 注意：`console.error` 自身抛错（被 patch、stderr 关闭等）会中断本轮快照迭代、
-   * 剩余处理器不再执行且异常向 `emit` 调用方传播——该已知风险评估后接受，不做结构防护。
+   * 按快照迭代：本轮触发期间注册/移除的处理器不影响本轮。处理器抛错输出到
+   * `console.error` 后继续；`console.error` 自身抛错会中断本轮（剩余处理器不再
+   * 执行、异常向调用方传播——评估后接受的已知风险）。
    *
    * @param key - 事件键
    * @param result - 事件载荷
