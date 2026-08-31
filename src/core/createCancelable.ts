@@ -37,6 +37,7 @@ class CancelError extends Error {
 function createCancelable() {
   /** 取消事件发布器，用于广播取消事件 */
   const eventEmitter = createEventEmitter<Record<PropertyKey, CancelError>>();
+
   /**
    * 包装异步函数为可取消执行
    *
@@ -44,52 +45,85 @@ function createCancelable() {
    * （副作用不发生）；已启动的工作不被阻止、继续跑完（结果被丢弃）；调用落定后
    * 对旧 key 的 `cancel` 为静默 no-op，不再触发 `onCancel`。
    *
+   * 取消/完成竞态仲裁：取消裁决经微任务延后，与结算门闩（`settled`）仲裁——
+   * 若取消到达时工作函数结果已产出但结算微任务尚未执行（同一微任务序列），
+   * 结算先落位、取消自动作废，最终 resolve 真实结果（不会出现"已完成却报取消"）；
+   * 反之取消先落位则正常以 `CancelError` 拒绝（此时工作确实未完成）。
+   *
    * @typeParam T - 异步函数返回类型
    * @param key - 取消标识符，与 `cancel(key)` 配对使用
    * @param asyncFunc - 要执行的异步函数
    * @param options - 可选配置
    * @param options.onCancel - 取消时执行的清理回调（如底层 API 的 abort）；
-   *   任何一次真实取消都会触发；其抛错不影响取消结果
-   * @param options.isCompleted - 判断"工作是否已完成"的谓词。工作函数的结果
-   *   已产出（如底层回调已触发）但 settle 清理微任务尚未执行时，`cancel(key)` 可能
-   *   先于清理到达；提供该谓词（与结果产出同步置真的门闩）可让取消**放弃覆盖**，
-   *   最终 resolve 真实结果。默认不提供：该窗口内 cancel 仍以 `CancelError` 拒绝
-   *   （结果被丢弃，既有时序契约）。
+   *   任何一次**生效的**取消都会触发（完成竞态中作废的取消不触发）；其抛错不影响取消结果。
+   *   回调在取消裁决的同一微任务内执行，晚于 `cancel()` 调用一帧。
    * @returns 异步函数的执行结果（取消时 promise 以 `CancelError` 拒绝）
    */
   const cancelable = <T>(
     key: PropertyKey,
     asyncFunc: () => T | Promise<T>,
-    options?: { onCancel?: () => void; isCompleted?: () => boolean }
+    options?: { onCancel?: () => void }
   ) => new Promise<T>((resolve, reject) => {
-    let cancelled = false;
+    let cancelRequested = false;
+    let settled = false;
+
     const off = eventEmitter.once(key, (error) => {
-      // 完成门闩：工作在取消到达前已完成（结果已在手）时放弃取消，
-      // 监听已在 once 包装内移除，后续 settle 路径正常 resolve 真实结果。
-      if (options?.isCompleted?.()) return;
-      cancelled = true;
-      reject(error);
-      options?.onCancel?.();
+      // 同步标记：启动前取消（同一 tick 内）须跳过工作函数
+      cancelRequested = true;
+      // 取消裁决推迟一个微任务：结算（settled）先落位则视为"取消到达时工作已完成",
+      // 放弃取消——最终由结算路径 resolve 真实结果
+      queueMicrotask(() => {
+        if (settled) return;
+        reject(error);
+        options?.onCancel?.();
+      });
     });
 
-    // 启动前取消（同一 tick 内的 cancel）短路：工作函数不再启动，副作用不发生；
-    // 已启动的工作不被阻止，继续跑完（结果被丢弃）。
-    // 已取消时短路返回即可：外层 Promise 已被监听器拒绝，resolve-after-reject 为 no-op，
-    // 无需 never-promise 悬挂链。
-    Promise.resolve().then(() => (cancelled ? void 0 : asyncFunc())).then(
-      (result) => {
-        // 落定即清理：监听在结果落定的同一微任务内移除，此后对旧 key 的
-        // cancel 为静默 no-op（不触发 onCancel），isPending 立即为 false
+    // 工作函数经微任务启动，启动前 cancel 短路（副作用不发生）
+    Promise.resolve().then(() => {
+      if (cancelRequested) return;
+      let ret: T | Promise<T>;
+      try {
+        ret = asyncFunc();
+      }
+      catch (error) {
+        // 同步抛错：视为立即落定，拒绝原始错误
+        settled = true;
         off();
-        // 取消短路分支走到此处时外层 Promise 已被拒绝，resolve 为 no-op（result 为 undefined）；
-        // 正常路径 result 恒为 T —— 收窄为 T 的断言在此为真
-        resolve(result as T);
-      },
-      (error) => {
+        reject(error);
+        return;
+      }
+      try {
+        if (ret && typeof (ret as PromiseLike<T>).then === 'function') {
+          // 结算回调直接挂在工作函数返回值上（不经过中间层微任务），
+          // 落定即清理：监听在结果落定的同一微任务内移除，此后对旧 key 的
+          // cancel 为静默 no-op（不触发 onCancel），isPending 立即为 false
+          (ret as PromiseLike<T>).then(
+            (result) => {
+              settled = true;
+              off();
+              resolve(result);
+            },
+            (error) => {
+              settled = true;
+              off();
+              reject(error);
+            }
+          );
+        }
+        else {
+          settled = true;
+          off();
+          resolve(ret as T);
+        }
+      }
+      catch (error) {
+        // thenable 的 then 访问/调用抛错：按落定失败处理
+        settled = true;
         off();
         reject(error);
       }
-    );
+    });
   });
 
   /**
@@ -97,7 +131,8 @@ function createCancelable() {
    * 时为静默 no-op（返回 false）。
    *
    * @param key - 取消标识符
-   * @returns 是否实际取消了进行中的注册
+   * @returns 是否存在进行中的注册并已发起取消；若取消到达时工作恰于同一微任务
+   *   序列内落定，该取消会作废（返回 true 但结果不被覆盖，见 cancelable 竞态仲裁）
    */
   const cancel = (key: PropertyKey) => {
     if (!eventEmitter.has(key)) return false;

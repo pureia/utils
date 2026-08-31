@@ -646,10 +646,16 @@ describe('createFetch', () => {
       expect(mockUniRequest).toHaveBeenCalled();
     });
 
-    it('complete 已触发后（同 tick 竞态窗口）abort 应返回真实响应而非中止结果', async () => {
-      mockSuccessResponse({ id: 7 }); // complete 同步触发，响应已在手
+    it('complete 已触发后（同微任务窗口）abort 应返回真实响应而非中止结果', async () => {
+      // 模拟生产时序：complete 异步触发（真实平台不可能是同步回调）；
+      // 取消在应答已到达（结果已在手）之后发出，应被核心域竞态仲裁作废
+      mockUniRequest.mockImplementation(({ complete }) => {
+        queueMicrotask(() => complete({ data: { id: 7 }, statusCode: 200, errMsg: 'request:ok', cookies: [], header: {} }));
+        return { abort: vi.fn() };
+      });
       const fetch = makeFetch();
       const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'completed-race' });
+      await new Promise<void>((r) => queueMicrotask(r)); // 先让 complete 发起
 
       fetch.abort('completed-race'); // 竞态窗口内的取消：不得覆盖已完成的结果
 

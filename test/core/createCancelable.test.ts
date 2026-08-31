@@ -22,6 +22,23 @@ describe('createCancelable', () => {
       const error = new Error('test error');
       await expect(cancelable('key1', () => Promise.reject(error))).rejects.toBe(error);
     });
+
+    it('工作函数同步抛错应传播原始错误', async () => {
+      const { cancelable } = createCancelable();
+      const error = new Error('sync-fail');
+      await expect(cancelable('sync-throw', () => { throw error; })).rejects.toBe(error);
+    });
+
+    it('thenable 的 then 访问/调用抛错应按落定失败拒绝', async () => {
+      const { cancelable } = createCancelable();
+      // 对齐原生 Promise 采纳语义：then 属性 getter 抛错视为 thenable 自身失败
+      const badGetter = Object.defineProperty({}, 'then', {
+        get() { throw new Error('broken then getter'); },
+      });
+      await expect(cancelable('bad-getter', () => badGetter as any)).rejects.toThrow('broken then getter');
+      const badCall: any = { then: () => { throw new Error('broken then call'); } };
+      await expect(cancelable('bad-call', () => badCall)).rejects.toThrow('broken then call');
+    });
   });
 
   describe('cancel 取消执行', () => {
@@ -47,19 +64,21 @@ describe('createCancelable', () => {
       expect(result).toBe('done');
     });
 
-    it('isCompleted 谓词为真时 cancel 不覆盖已完成的执行', async () => {
+    it('取消与落定的微任务竞态窗：工作已产出值 → 取消作废、返回真实结果', async () => {
       const { cancelable: c, cancel } = createCancelable();
-      let completed = false;
-      const promise = c('completed-key', () => Promise.resolve('ok'), {
-        isCompleted: () => completed,
-      });
-      completed = true; // 模拟工作已完成（如 HTTP complete 已触发、结果已在手）
+      let onCancelCalls = 0;
+      const promise = c('race-key', () => Promise.resolve('ok'), { onCancel: () => { onCancelCalls++; } });
+      // 同一 tick 内先发起工作，再排队 cancel 微任务（E1 窗口形态：cancel 在结算前到达）
+      const racer = Promise.resolve().then(() => cancel('race-key'));
 
-      cancel('completed-key'); // 竞态窗口内的取消
-
-      await expect(promise).resolves.toBe('ok');
-      // 竞态窗口内 cancel 虽命中监听器，但 once 包装已自移除，后续 cancel 为 no-op
-      expect(cancel('completed-key')).toBe(false);
+      const [r1, r2] = await Promise.allSettled([promise, racer]);
+      expect(r1.status).toBe('fulfilled');
+      expect((r1 as PromiseFulfilledResult<unknown>).value).toBe('ok');
+      expect(r2.status).toBe('fulfilled');
+      // 作废的取消不触发 onCancel（不再对已完成工作重复清理）
+      expect(onCancelCalls).toBe(0);
+      // 事后 cancel 为 no-op
+      expect(cancel('race-key')).toBe(false);
     });
 
     it('同一 key 两次并发注册，cancel(key) 广播给全部（均为 CancelError）', async () => {

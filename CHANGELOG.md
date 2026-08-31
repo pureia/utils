@@ -18,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 公共 API 注释统一重写：补 `CmpFunc`/`ReplacerFunc` 文档、`buildFullConfig` 新增 `@example`，注释改以行为契约级描述并移除全部 ADR 编号引用
-- `createCancelable`：可选参数合并为 options 对象——`cancelable(key, fn, onCancel?, options?)` 改为 `cancelable(key, fn, options?: { onCancel?, isCompleted? })`（破坏性签名调整，0.x 未使用阶段；调用方如需 isCompleted 不再传 undefined 占位）
 - CONTEXT.md 词表同步：「事件发射器」词条改为与实现一致（处理器抛错统一输出 `console.error`，`onError` 注入已移除）；移除词条中的 ADR 编号引用；补充 once 按原引用退订语义
 - README 轻量修正：`FetchCode` 与 `ResponseResult` 中 `-4` 措辞统一、`buildFullConfig`/`FetchCode` 示例改为子路径导入（与 uni-app 环境警告自洽）、核心工具表补 `onCancel`
 - `createCancelable`：移除启动前取消的 never-promise 悬挂——已取消分支直接短路返回（resolve-after-reject 为 no-op），行为等价、实现与注释简化
@@ -27,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `stableStringify`：数组元素传给 toJSON/replacer 的 key 由数字索引改为字符串索引，与原生 `JSON.stringify` 行为对齐（此前与"签名与原生 replacer 一致"的注释声明不符）；`ReplacerFunc` 的 `key` 类型由 `string | number` 收窄为 `string`
-- `createCancelable`：修复"取消与落定竞态窗口"——工作函数结果已产出（如底层回调已触发）但 settle 清理微任务尚未执行时，`cancel(key)` 不再覆盖已完成的结果；`cancelable` 新增可选 `options.isCompleted` 谓词（非破坏），`createFetch` 在 `uni.request` 的 `complete` 回调内置完成门闩，竞态窗口内 `abort(key)` 返回真实响应而非 `-1`（副作用型请求避免"已执行却报取消"误判）
+- `createCancelable`：修复"取消与落定竞态窗口"——取消裁决经微任务延后、与结算门闩仲裁（内部实现，无外部 API）：工作函数结果已产出（如底层回调已触发）但结算微任务尚未执行时，`cancel(key)` 不再覆盖已完成的结果；作废的取消不触发 `onCancel`（不再对已完成工作重复 abort）。`cancelable` 可选参数合并为 options 对象——`cancelable(key, fn, onCancel?, options?)` 改为 `cancelable(key, fn, options?: { onCancel? })`（破坏性签名调整，0.x 未使用阶段）
 - `createFetch`：拦截器返回值运行时校验强化——请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选；原配置含 key 而返回值丢 key 视为非法，保证 `abort(key)` 不失效），响应拦截器须返回完整 `ResponseResult`（ok/code/msg/header/cookies/data/requestConfig），非法返回值告警并沿用上一值
 
 ### Docs

@@ -428,13 +428,11 @@ function createFetch<R extends BaseRequestConfig>(
     const { host, url, method, header, timeout, data, key } = fullRequestConfig;
 
     let requestTask: UniApp.RequestTask | undefined;
-    // 完成门闩：uni.request 的 complete 回调与 responsePromise 的 resolve 同步触发，
-    // 该标记作为"取消/完成竞态窗口"的判定依据——窗口内到达的 abort(key) 不再覆盖
-    // 已完成的结果（核心工具域语义见 createCancelable 的 options.isCompleted）。
-    let completed = false;
 
     // responsePromise 只负责将 uni.request 的 complete 回调桥接为 Promise；
     // 取消逻辑完全由外层 cancelable 处理，因此不需要 reject 参数。
+    // （取消/完成竞态由核心域仲裁：complete 已触发、结果已在手时，窗口内到达的
+    // abort 自动作废，返回真实响应——见 createCancelable 的时序契约。）
     const responsePromise = new Promise<ResponseResult<FullRequestConfig, D>>((resolve) => {
       requestTask = uni.request({
         url: `${host}${url}`,
@@ -444,7 +442,6 @@ function createFetch<R extends BaseRequestConfig>(
         // data 类型为 unknown（见 RequestConfig），传平台时按 uni.request 签名收窄
         data: data as UniApp.RequestOptions['data'],
         complete(result) {
-          completed = true;
           const {
             data: respData,
             header: respHeader,
@@ -471,7 +468,7 @@ function createFetch<R extends BaseRequestConfig>(
     });
 
     return key
-      ? cancelable(key, () => responsePromise, { onCancel: () => requestTask?.abort(), isCompleted: () => completed })
+      ? cancelable(key, () => responsePromise, { onCancel: () => requestTask?.abort() })
       : responsePromise;
   };
 
@@ -612,7 +609,8 @@ function createFetch<R extends BaseRequestConfig>(
      * - `cancelIntentEmitter`：起跑前取消意向（去重共享执行尚未起跑的同一 tick 内
      *   `abort` 短路，请求不发出；非去重路径同 tick abort 只能中止已发出的传输层）；
      * - `asyncDedupe` 组取消：去重请求 `abort(key)` 为整组取消（执行者与等待者同收 -1）。
-     * 网络层请求已完成（`complete` 已触发）时，取消不再覆盖结果（见 dispatchRequest 的完成门闩）。
+     * 网络层请求已完成（`complete` 已触发、结果已在手）时，竞态窗口内到达的取消
+     * 自动作废、返回真实响应（由核心域取消/完成竞态仲裁，无需额外门闩）。
      */
     abort(key: string) {
       cancel(key); // 执行期取消（拦截器/传输层，现有路径）
