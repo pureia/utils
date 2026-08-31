@@ -21,6 +21,21 @@ class CancelError extends Error {
   }
 }
 
+/** 执行生命周期：scheduled（已注册、工作函数未启动）→ running（已启动）→ settled（已落定） */
+type ExecutionState = 'scheduled' | 'running' | 'settled';
+
+/**
+ * 一次 `cancelable` 调用的执行状态。
+ *
+ * `state` 描述执行生命周期；`cancelSignaled` 是取消信号（同步标记）——只在
+ * `scheduled` 阶段起作用（短路启工）。取消裁决经微任务延后、与 `settled` 门闩
+ * 仲裁（可作废），因此取消不是终止状态。
+ */
+interface Execution {
+  state: ExecutionState;
+  cancelSignaled: boolean;
+}
+
 /**
  * 创建可取消执行所需的最小组合：`cancelable` 包装异步函数、`cancel` 按 key 取消、
  * `isPending` 查询在途注册。
@@ -55,8 +70,10 @@ function createCancelable() {
    * @param asyncFunc - 要执行的异步函数
    * @param options - 可选配置
    * @param options.onCancel - 取消时执行的清理回调（如底层 API 的 abort）；
-   *   任何一次**生效的**取消都会触发（完成竞态中作废的取消不触发）；其抛错不影响取消结果。
-   *   回调在取消裁决的同一微任务内执行，晚于 `cancel()` 调用一帧。
+   *   任何一次**生效的**取消都会触发（完成竞态中作废的取消不触发）。
+   *   回调在取消裁决的同一微任务内执行，晚于 `cancel()` 调用一帧且晚于 reject——
+   *   回调抛错不影响取消结果（异常自微任务内逃逸为全局未捕获，不做结构防护，
+   *   需要时由调用方自行兜底）。
    * @returns 异步函数的执行结果（取消时 promise 以 `CancelError` 拒绝）
    */
   const cancelable = <T>(
@@ -64,64 +81,56 @@ function createCancelable() {
     asyncFunc: () => T | Promise<T>,
     options?: { onCancel?: () => void }
   ) => new Promise<T>((resolve, reject) => {
-    let cancelRequested = false;
-    let settled = false;
+    const execution: Execution = { state: 'scheduled', cancelSignaled: false };
 
+    // 取消信号：同步标记 + 延后裁决（与结算门闩仲裁，见上方时序契约）。
+    // once 触发即自清理——此后对该 key 的 cancel 为静默 no-op
     const off = eventEmitter.once(key, (error) => {
-      // 同步标记：启动前取消（同一 tick 内）须跳过工作函数
-      cancelRequested = true;
-      // 取消裁决推迟一个微任务：结算（settled）先落位则视为"取消到达时工作已完成",
-      // 放弃取消——最终由结算路径 resolve 真实结果
+      execution.cancelSignaled = true;
       queueMicrotask(() => {
-        if (settled) return;
+        if (execution.state === 'settled') return; // 结算先落位 → 取消作废
+        execution.state = 'settled';
         reject(error);
         options?.onCancel?.();
       });
     });
 
-    // 工作函数经微任务启动，启动前 cancel 短路（副作用不发生）
+    // 落定的统一出口：成功、失败、取消仲裁均经此处转移状态并清理注册
+    const settleResolve = (value: T) => {
+      execution.state = 'settled';
+      off();
+      resolve(value);
+    };
+    const settleReject = (error: unknown) => {
+      execution.state = 'settled';
+      off();
+      reject(error);
+    };
+
+    // 工作函数经微任务启动——启动前的取消（同一 tick）短路，副作用不发生
     Promise.resolve().then(() => {
-      if (cancelRequested) return;
+      if (execution.cancelSignaled) return;
+      execution.state = 'running';
       let ret: T | Promise<T>;
       try {
         ret = asyncFunc();
       }
       catch (error) {
-        // 同步抛错：视为立即落定，拒绝原始错误
-        settled = true;
-        off();
-        reject(error);
+        settleReject(error); // 同步抛错：视为立即落定，拒绝原始错误
         return;
       }
       try {
-        if (ret && typeof (ret as PromiseLike<T>).then === 'function') {
-          // 结算回调直接挂在工作函数返回值上（不经过中间层微任务），
-          // 落定即清理：监听在结果落定的同一微任务内移除，此后对旧 key 的
-          // cancel 为静默 no-op（不触发 onCancel），isPending 立即为 false
-          (ret as PromiseLike<T>).then(
-            (result) => {
-              settled = true;
-              off();
-              resolve(result);
-            },
-            (error) => {
-              settled = true;
-              off();
-              reject(error);
-            }
-          );
+        // then 单次访问（对齐原生 Promise 采纳语义）；get/call 抛错按落定失败拒绝
+        const then = ret && (ret as PromiseLike<T>).then;
+        if (typeof then === 'function') {
+          then.call(ret as PromiseLike<T>, settleResolve, settleReject);
         }
         else {
-          settled = true;
-          off();
-          resolve(ret as T);
+          settleResolve(ret as T);
         }
       }
       catch (error) {
-        // thenable 的 then 访问/调用抛错：按落定失败处理
-        settled = true;
-        off();
-        reject(error);
+        settleReject(error);
       }
     });
   });
