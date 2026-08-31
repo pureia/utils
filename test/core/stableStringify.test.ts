@@ -229,6 +229,25 @@ describe('stableStringify', () => {
     });
   });
 
+  describe('数组元素 key 类型（与原生 JSON.stringify 一致）', () => {
+    it('toJSON 的 key 参数对数组元素为索引字符串', () => {
+      const libKeys: unknown[] = [];
+      const nativeKeys: unknown[] = [];
+      stableStringify([{ toJSON(k: unknown) { libKeys.push(k); return k; } }]);
+      JSON.stringify([{ toJSON(k: unknown) { nativeKeys.push(k); return k; } }]);
+      expect(libKeys).toEqual(['0']);
+      expect(libKeys).toEqual(nativeKeys);
+    });
+
+    it('replacer 的 key 对数组元素为索引字符串（根为空字符串）', () => {
+      const keys: unknown[] = [];
+      stableStringify([1, 2], {
+        replacer: (_parent, key, value) => { keys.push(key); return value; },
+      });
+      expect(keys).toEqual(['', '0', '1']);
+    });
+  });
+
   describe('空容器格式（与原生 JSON.stringify 对齐）', () => {
     it('pretty-print 模式下空对象应紧凑输出 {}', () => {
       expect(stableStringify({}, { space: 2 })).toBe('{}');

@@ -73,6 +73,62 @@ describe('createEventEmitter', () => {
     });
   });
 
+  describe('once 与 off 原引用的交互（对齐 Node 惯例）', () => {
+    it('once 注册后 off(原引用) 应解除订阅', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      let calls = 0;
+      const h = () => { calls++; };
+      emitter.once('user:login', h);
+      emitter.off('user:login', h);
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      expect(calls).toBe(0);
+    });
+
+    it('once 正常路径仍只触发一次', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      let calls = 0;
+      const h = () => { calls++; };
+      emitter.once('user:login', h);
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      emitter.emit('user:login', { userId: '2', name: 'Jane' });
+      expect(calls).toBe(1);
+    });
+
+    it('once 返回的取消函数仍有效', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      let calls = 0;
+      const unsubscribe = emitter.once('user:login', () => { calls++; });
+      unsubscribe();
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      expect(calls).toBe(0);
+    });
+
+    it('两个 once 注册移除其一，另一个仍触发一次', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      let a = 0; let b = 0;
+      const ha = () => { a++; };
+      const hb = () => { b++; };
+      emitter.once('user:login', ha);
+      emitter.once('user:login', hb);
+      emitter.off('user:login', ha);
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      emitter.emit('user:login', { userId: '2', name: 'Jane' });
+      expect(a).toBe(0);
+      expect(b).toBe(1);
+      expect(emitter.has('user:login')).toBe(false); // 最后一个处理程序移除后 key 清理
+    });
+
+    it('off 原引用不影响 on 注册的同引用处理器的既有语义', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      let calls = 0;
+      const h = () => { calls++; };
+      emitter.on('user:login', h);
+      emitter.off('user:login', h);
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      expect(calls).toBe(0);
+    });
+  });
+
   describe('unsubscribe', () => {
     it('should remove specific handler via unsubscribe function', () => {
       const handler1 = vi.fn();

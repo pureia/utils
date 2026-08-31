@@ -35,10 +35,7 @@ class CancelError extends Error {
  * ```
  */
 function createCancelable() {
-  // 已知风险（评估后接受，不做结构防护）：onCancel 抛错经 emit 的逐 handler 兜底到
-  // console.error；若 console.error 自身抛错（被 patch、stderr 关闭等），emit 的快照
-  // 迭代将中断——同 key 广播下剩余注册收不到取消事件、promise 悬挂。触发需 onCancel
-  // 抛错与 console.error 抛错同时叠加，概率极低；createEventEmitter 对处理器抛错统一输出到 console.error。
+  /** 取消事件发布器，用于广播取消事件 */
   const eventEmitter = createEventEmitter<Record<PropertyKey, CancelError>>();
   /**
    * 包装异步函数为可取消执行
@@ -64,14 +61,16 @@ function createCancelable() {
       });
       // 启动前取消（同一 tick 内的 cancel）短路：工作函数不再启动，副作用不发生；
       // 已启动的工作不被阻止，继续跑完（结果被丢弃）。
-      // 已取消时返回 never-promise：外层 Promise 已被监听器拒绝（监听器亦已自清理），
-      // 链悬挂即可，无需再启动工作或清理。
-      Promise.resolve().then(() => (cancelled ? new Promise<T>(() => {}) : asyncFunc())).then(
+      // 已取消时短路返回即可：外层 Promise 已被监听器拒绝，resolve-after-reject 为 no-op，
+      // 无需 never-promise 悬挂链。
+      Promise.resolve().then(() => (cancelled ? void 0 : asyncFunc())).then(
         (result) => {
           // 落定即清理：监听在结果落定的同一微任务内移除，此后对旧 key 的
           // cancel 为静默 no-op（不触发 onCancel），isPending 立即为 false
           off();
-          resolve(result);
+          // 取消短路分支走到此处时外层 Promise 已被拒绝，resolve 为 no-op（result 为 undefined）；
+          // 正常路径 result 恒为 T —— 收窄为 T 的断言在此为真
+          resolve(result as T);
         },
         (error) => {
           off();

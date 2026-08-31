@@ -42,16 +42,27 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
   function clear() { store.clear(); }
 
   /**
-   * 按引用移除指定处理程序（引用须与注册时一致）；一般推荐用 `on()`/`once()`
-   * 返回的取消订阅函数，无需持有 handler 引用。
+   * 按引用移除指定处理程序（引用须与注册时一致；`once` 注册的处理器亦支持按原引用
+   * 退订——包装内保存原始引用供匹配，对齐 Node EventEmitter 惯例）；一般推荐用
+   * `on()`/`once()` 返回的取消订阅函数，无需持有 handler 引用。
    *
    * @param key - 事件键
    * @param handler - 注册时传入的处理程序
    */
   function off<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>) {
     const handlers = store.get(key);
-    handlers?.delete(handler as (result: E[EventKey<E>]) => void);
-    handlers?.size === 0 && remove(key);
+    if (!handlers) return;
+    const raw = handler as (result: E[EventKey<E>]) => void;
+    if (!handlers.delete(raw)) {
+      // 未命中直接引用：按 Node 惯例匹配 once 包装保存的原始引用（wrapper.listener）
+      for (const wrapped of handlers) {
+        if ((wrapped as unknown as { listener?: (result: E[EventKey<E>]) => void }).listener === raw) {
+          handlers.delete(wrapped);
+          break;
+        }
+      }
+    }
+    handlers.size === 0 && remove(key);
   }
 
   /**
@@ -73,10 +84,13 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
    * @returns 取消订阅函数
    */
   function once<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>): () => void {
-    const onceHandler = (result: EventPayload<E, K>) => {
+    const onceHandler = ((result: EventPayload<E, K>) => {
       off(key, onceHandler as EventHandler<E, K>);
       handler(result);
-    };
+    }) as (result: E[EventKey<E>]) => void;
+    // 保存原始监听器引用，供 off(key, 原引用) 解包装（对齐 Node EventEmitter）
+    (onceHandler as unknown as { listener: (result: E[EventKey<E>]) => void }).listener =
+      handler as (result: E[EventKey<E>]) => void;
     return on(key, onceHandler as EventHandler<E, K>);
   }
 
@@ -100,7 +114,7 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
         handler(result);
       }
       catch (error) {
-        console.error(`createEventEmitter error in "${String(key)}":`, error);
+        console.error(`EventEmitter error in "${String(key)}":`, error);
       }
     });
   }

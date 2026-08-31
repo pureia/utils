@@ -28,8 +28,8 @@ type CmpFunc = (
   getter?: { get: (key: string) => any }
 ) => number;
 
-/** 过滤/转换函数：签名与原生 `JSON.stringify` 的 replacer 一致，返回 `undefined` 时跳过该属性 */
-type ReplacerFunc = (this: any, parent: any, key: string | number, value: any) => any;
+/** 过滤/转换函数：签名与原生 `JSON.stringify` 的 replacer 一致（key 恒为字符串，数组元素即索引字符串），返回 `undefined` 时跳过该属性 */
+type ReplacerFunc = (this: any, parent: any, key: string, value: any) => any;
 
 /**
  * `stableStringify` 选项；未提供的字段按原生 `JSON.stringify` 的默认语义处理。
@@ -107,7 +107,7 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
 
   const seen = new Set<object>();
 
-  function stringify(parent: any, key: string | number, node: any, level: number): string | undefined {
+  function stringify(parent: any, key: string, node: any, level: number): string | undefined {
     const indent = space ? `\n${space.repeat(level)}` : '';
     const colonSeparator = space ? ': ' : ':';
 
@@ -136,7 +136,8 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
       seen.add(node);
       const out: string[] = [];
       for (let i = 0; i < node.length; i++) {
-        const item = stringify(node, i, node[i], level + 1);
+        // key 恒为字符串（对齐原生 JSON.stringify）：数组元素传索引字符串，而非数字
+        const item = stringify(node, String(i), node[i], level + 1);
         out.push(indent + space + (item === undefined ? 'null' : item));
       }
       seen.delete(node);
