@@ -38,3 +38,6 @@ coverage/
 # AI files
 .claude/
 .trae/
+
+# Local issue tracking (docs/agents/issue-tracker.md: issues live under .scratch/<feature>/)
+.scratch/
