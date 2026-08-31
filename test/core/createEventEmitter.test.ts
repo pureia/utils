@@ -84,6 +84,17 @@ describe('createEventEmitter', () => {
       expect(calls).toBe(0);
     });
 
+    it('off(原引用) 不应误删恰好带同名 .listener 属性的普通处理器', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      const leaked: any = vi.fn();
+      leaked.listener = () => {}; // 模拟遗留属性（历史 once 包装解包后残留）
+      emitter.on('user:login', leaked);
+      // target 未注册（监听不存在）→ off 必须为 no-op 而非误删带 .listener 属性的普通处理器
+      emitter.off('user:login', leaked.listener);
+      emitter.emit('user:login', { userId: '1', name: 'John' });
+      expect(leaked).toHaveBeenCalledTimes(1);
+    });
+
     it('once 正常路径仍只触发一次', () => {
       const emitter = createEventEmitter<TestEvents>();
       let calls = 0;
@@ -153,15 +164,38 @@ describe('createEventEmitter', () => {
 
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      eventEmitter.on('message:send', errorHandler);
-      eventEmitter.on('message:send', normalHandler);
-      eventEmitter.emit('message:send', 'hello');
+      try {
+        eventEmitter.on('message:send', errorHandler);
+        eventEmitter.on('message:send', normalHandler);
+        eventEmitter.emit('message:send', 'hello');
 
-      expect(errorHandler).toHaveBeenCalledTimes(1);
-      expect(normalHandler).toHaveBeenCalledTimes(1);
-      expect(consoleSpy).toHaveBeenCalled();
+        expect(errorHandler).toHaveBeenCalledTimes(1);
+        expect(normalHandler).toHaveBeenCalledTimes(1);
+        expect(consoleSpy).toHaveBeenCalled();
+      }
+      finally {
+        consoleSpy.mockRestore();
+      }
+    });
 
-      consoleSpy.mockRestore();
+    it('once 处理器抛错后也应自移除（不再触发）', () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        let calls = 0;
+        eventEmitter.once('message:send', () => {
+          calls++;
+          throw new Error('boom');
+        });
+
+        eventEmitter.emit('message:send', 'a');
+        eventEmitter.emit('message:send', 'b');
+
+        expect(calls).toBe(1); // 抛错后 once 已自移除
+      }
+      finally {
+        consoleSpy.mockRestore();
+      }
     });
   });
 

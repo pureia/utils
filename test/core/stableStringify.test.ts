@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { stableStringify } from '@purea/utils';
+import stableStringifyDefault from '../../src/core/stableStringify';
 
 describe('stableStringify', () => {
   describe('基本对象 key 排序', () => {
@@ -193,6 +194,17 @@ describe('stableStringify', () => {
       arr.push(arr);
       const result = stableStringify(arr, { cycles: true });
       expect(result).toBe('[1,"__cycle__"]');
+    });
+
+    it('bigint 值应抛 TypeError（对齐原生 JSON.stringify）', () => {
+      expect(() => JSON.stringify(1n)).toThrow(TypeError);
+      expect(() => stableStringify({ n: 1n })).toThrow(TypeError);
+    });
+  });
+
+  describe('default 导出', () => {
+    it('default 导出应与命名导出指向同一实现', () => {
+      expect(stableStringifyDefault).toBe(stableStringify);
     });
   });
 

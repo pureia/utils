@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CancelError, createCancelable } from '@purea/utils';
+import createCancelableDefault from '../../src/core/createCancelable';
 
 describe('createCancelable', () => {
   describe('cancelable 基本执行', () => {
@@ -44,6 +45,36 @@ describe('createCancelable', () => {
       // 完成后 cancel 应该不抛错
       expect(() => cancel('key')).not.toThrow();
       expect(result).toBe('done');
+    });
+
+    it('isCompleted 谓词为真时 cancel 不覆盖已完成的执行', async () => {
+      const { cancelable: c, cancel } = createCancelable();
+      let completed = false;
+      const promise = c('completed-key', () => Promise.resolve('ok'), undefined, {
+        isCompleted: () => completed,
+      });
+      completed = true; // 模拟工作已完成（如 HTTP complete 已触发、结果已在手）
+
+      cancel('completed-key'); // 竞态窗口内的取消
+
+      await expect(promise).resolves.toBe('ok');
+      // 竞态窗口内 cancel 虽命中监听器，但 once 包装已自移除，后续 cancel 为 no-op
+      expect(cancel('completed-key')).toBe(false);
+    });
+
+    it('同一 key 两次并发注册，cancel(key) 广播给全部（均为 CancelError）', async () => {
+      const { cancelable: c, cancel } = createCancelable();
+      const p1 = c('broadcast-key', () => new Promise(() => {}));
+      const p2 = c('broadcast-key', () => new Promise(() => {}));
+
+      expect(cancel('broadcast-key')).toBe(true);
+
+      await expect(p1).rejects.toBeInstanceOf(CancelError);
+      await expect(p2).rejects.toBeInstanceOf(CancelError);
+    });
+
+    it('default 导出应与命名导出指向同一实现', () => {
+      expect(createCancelableDefault).toBe(createCancelable);
     });
 
     it('多次 cancel 同一个 key 不应抛错', async () => {

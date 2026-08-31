@@ -1,4 +1,4 @@
-import type { BaseRequestConfig } from '@purea/utils';
+import type { BaseRequestConfig, ResponseResult } from '@purea/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFetch as _createFetch, buildFullConfig, CancelError, FetchCode } from '@purea/utils';
 
@@ -646,22 +646,55 @@ describe('createFetch', () => {
       expect(mockUniRequest).toHaveBeenCalled();
     });
 
+    it('complete 已触发后（同 tick 竞态窗口）abort 应返回真实响应而非中止结果', async () => {
+      mockSuccessResponse({ id: 7 }); // complete 同步触发，响应已在手
+      const fetch = makeFetch();
+      const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'completed-race' });
+
+      fetch.abort('completed-race'); // 竞态窗口内的取消：不得覆盖已完成的结果
+
+      const result = await requestPromise;
+      expect(result.ok).toBe(true);
+      expect(result.code).toBe(200);
+      expect(result.data).toEqual({ id: 7 });
+      expect(result.msg).toBe('OK');
+    });
+
+    it('用户主动取消的结果应跳过响应拦截器链', async () => {
+      mockUniRequest.mockReturnValue({ abort: vi.fn() }); // 请求挂起
+      const fetch = makeFetch();
+      const respSpy = vi.fn((r: ResponseResult<any, any>) => r);
+      fetch.interceptors.response.use(respSpy);
+
+      const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'skip-chain' });
+      fetch.abort('skip-chain');
+
+      const result = await requestPromise;
+      expect(result.code).toBe(FetchCode.ABORT);
+      expect(respSpy).not.toHaveBeenCalled();
+    });
+
     it('并发请求占用同一 key 时应告警（key 需唯一）', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const fetch = makeFetch();
       const mockRequestTask = { abort: vi.fn() };
       mockUniRequest.mockReturnValue(mockRequestTask); // 请求挂起，保持 key 占用
+      let p1: Promise<unknown>;
+      let p2: Promise<unknown>;
 
-      const fetch = makeFetch();
-      const p1 = fetch.request({ url: '/users', method: 'GET', key: 'dup-key' });
-      // 非去重请求的 core 同步注册取消监听，第二个同 key 请求进入时即触发告警
-      const p2 = fetch.request({ url: '/users', method: 'GET', key: 'dup-key' });
+      try {
+        p1 = fetch.request({ url: '/users', method: 'GET', key: 'dup-key' });
+        // 非去重请求的 core 同步注册取消监听，第二个同 key 请求进入时即触发告警
+        p2 = fetch.request({ url: '/users', method: 'GET', key: 'dup-key' });
 
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('key'));
-
-      warnSpy.mockRestore();
-      // 清理挂起请求，避免测试悬挂
-      fetch.abort('dup-key');
-      await Promise.allSettled([p1, p2]);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('已被其他进行中的请求占用'));
+      }
+      finally {
+        warnSpy.mockRestore();
+        // 清理挂起请求，避免测试悬挂
+        fetch.abort('dup-key');
+        await Promise.allSettled([p1!, p2!]);
+      }
     });
 
     it('没有 key 的请求不受 abort 影响', async () => {
@@ -703,48 +736,59 @@ describe('createFetch', () => {
 
   describe('拦截器取消', () => {
     it('请求拦截器期间 abort 应归一化为中止结果', async () => {
-      mockUniRequest.mockReturnValue({ abort: vi.fn() });
+      vi.useFakeTimers(); // 确定性推进，避免真实 100ms 等待在慢 CI 上抖动
+      try {
+        mockUniRequest.mockReturnValue({ abort: vi.fn() });
 
-      const fetch = makeFetch();
-      fetch.interceptors.request.use(async (config) => {
-        // 模拟异步操作，给 abort 留出触发时机
-        await new Promise(r => setTimeout(r, 100));
-        return config;
-      });
+        const fetch = makeFetch();
+        fetch.interceptors.request.use(async (config) => {
+          // 模拟异步操作，给 abort 留出触发时机
+          await new Promise(r => setTimeout(r, 100));
+          return config;
+        });
 
-      const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'ix-cancel' });
-      // 让出控制权，等待请求拦截器注册 cancelable 的 once 监听器
-      await new Promise(r => setTimeout(r, 0));
-      fetch.abort('ix-cancel');
+        const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'ix-cancel' });
+        // 让请求拦截器启动并挂起在 setTimeout(100)
+        await vi.advanceTimersByTimeAsync(0);
+        fetch.abort('ix-cancel');
 
-      const result = await requestPromise;
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe(FetchCode.ABORT);
-      expect(result.msg).toBe('Request Abort');
-      // 拦截器被取消后，不应到达 dispatchRequest
-      expect(mockUniRequest).not.toHaveBeenCalled();
+        const result = await requestPromise;
+        expect(result.ok).toBe(false);
+        expect(result.code).toBe(FetchCode.ABORT);
+        expect(result.msg).toBe('Request Abort');
+        // 拦截器被取消后，不应到达 dispatchRequest
+        expect(mockUniRequest).not.toHaveBeenCalled();
+      }
+      finally {
+        vi.useRealTimers();
+      }
     });
 
     it('响应拦截器期间 abort 应归一化为中止结果', async () => {
-      mockUniRequest.mockImplementation(({ complete }) => {
-        complete({ data: { id: 1 }, statusCode: 200, errMsg: 'ok' });
-      });
+      vi.useFakeTimers();
+      try {
+        mockUniRequest.mockImplementation(({ complete }) => {
+          complete({ data: { id: 1 }, statusCode: 200, errMsg: 'ok' });
+        });
 
-      const fetch = makeFetch();
-      fetch.interceptors.response.use(async (response) => {
-        await new Promise(r => setTimeout(r, 100));
-        return response;
-      });
+        const fetch = makeFetch();
+        fetch.interceptors.response.use(async (response) => {
+          await new Promise(r => setTimeout(r, 100));
+          return response;
+        });
 
-      const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'rx-cancel' });
-      // 让出控制权，等待响应拦截器注册 cancelable 的 once 监听器
-      await new Promise(r => setTimeout(r, 0));
-      fetch.abort('rx-cancel');
+        const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'rx-cancel' });
+        await vi.advanceTimersByTimeAsync(0);
+        fetch.abort('rx-cancel');
 
-      const result = await requestPromise;
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe(FetchCode.ABORT);
-      expect(result.msg).toBe('Request Abort');
+        const result = await requestPromise;
+        expect(result.ok).toBe(false);
+        expect(result.code).toBe(FetchCode.ABORT);
+        expect(result.msg).toBe('Request Abort');
+      }
+      finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -946,30 +990,36 @@ describe('createFetch', () => {
   describe('请求域核心语义回归（拦截器改写 key 与链快照）', () => {
     describe('决策 1 取消 key 统一为拦截器处理后的当前配置', () => {
       it('请求拦截器修改 key 后，abort 应按新 key 取消', async () => {
-        mockUniRequest.mockImplementation(({ complete }) => {
-          complete({ data: null, statusCode: 200, errMsg: 'request:ok' });
-        });
+        vi.useFakeTimers();
+        try {
+          mockUniRequest.mockImplementation(({ complete }) => {
+            complete({ data: null, statusCode: 200, errMsg: 'request:ok' });
+          });
 
-        const fetch = makeFetch();
-        fetch.interceptors.request.use((config) => {
-          config.key = 'rewritten-key';
-          return config;
-        });
-        fetch.interceptors.request.use(async (config) => {
-          await new Promise(r => setTimeout(r, 100));
-          return config;
-        });
+          const fetch = makeFetch();
+          fetch.interceptors.request.use((config) => {
+            config.key = 'rewritten-key';
+            return config;
+          });
+          fetch.interceptors.request.use(async (config) => {
+            await new Promise(r => setTimeout(r, 100));
+            return config;
+          });
 
-        const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'original-key' });
-        // 让出控制权：等待第一个拦截器改写 key、第二个拦截器注册取消监听
-        await new Promise(r => setTimeout(r, 0));
-        fetch.abort('rewritten-key');
+          const requestPromise = fetch.request({ url: '/users', method: 'GET', key: 'original-key' });
+          // 让第一个拦截器改写 key、第二个拦截器挂起在 setTimeout(100)
+          await vi.advanceTimersByTimeAsync(0);
+          fetch.abort('rewritten-key');
 
-        const result = await requestPromise;
-        expect(result.ok).toBe(false);
-        expect(result.code).toBe(FetchCode.ABORT);
-        // 取消发生在拦截器阶段，未到达传输层
-        expect(mockUniRequest).not.toHaveBeenCalled();
+          const result = await requestPromise;
+          expect(result.ok).toBe(false);
+          expect(result.code).toBe(FetchCode.ABORT);
+          // 取消发生在拦截器阶段，未到达传输层
+          expect(mockUniRequest).not.toHaveBeenCalled();
+        }
+        finally {
+          vi.useRealTimers();
+        }
       });
     });
 
@@ -1052,10 +1102,158 @@ describe('createFetch', () => {
         expect(result.ok).toBe(true);
         expect(result.code).toBe(200);
         expect(warnSpy).toHaveBeenCalled();
+        expect(warnSpy.mock.calls[0]![0]).toContain('完整 ResponseResult');
       }
       finally {
         warnSpy.mockRestore();
       }
+    });
+
+    it('请求拦截器丢 key（原配置含 key）时应告警并沿用上一配置（abort 保持可用）', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.request.use((config: any) => {
+          const { key: _dropped, ...rest } = config;
+          return rest as any;
+        });
+
+        const result = await fetch.request({ url: '/users', method: 'GET', key: 'keep-key' });
+
+        expect(result.ok).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('丢失了 key'));
+        expect(mockUniRequest).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.example.com/users' }));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('请求拦截器丢 method 时应告警并沿用上一配置', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.request.use((config: any) => {
+          const { method: _dropped, ...rest } = config;
+          return rest;
+        });
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('完整请求配置'));
+        expect(mockUniRequest).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.example.com/users' }));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器返回缺 data 的形状时应告警并沿用上一结果', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.response.use((_result: any) => ({ ok: true, code: 200 }) as any);
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(result.data).toEqual({ id: 1 }); // 沿用上一结果（真实响应而非半成品）
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('完整 ResponseResult'));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器返回完整形状（data 为 null）时应通过校验', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.response.use((result: any) => ({ ...result, data: null }));
+
+        const noWarn = await fetch.request({ url: '/first', method: 'GET' });
+        expect(noWarn.data).toBeNull(); // 拦截器改写生效
+        expect(warnSpy).not.toHaveBeenCalled();
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('请求拦截器返回非对象（null）时应告警并沿用上一配置', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.request.use(() => null as any);
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('完整请求配置'));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器返回非对象（字符串）时应告警并沿用上一结果', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.response.use(() => 'bad' as any);
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(result.data).toEqual({ id: 1 });
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('完整 ResponseResult'));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器返回 data: undefined 的形状时应告警并沿用上一结果', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.response.use((result: any) => ({ ...result, data: undefined }));
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(result.data).toEqual({ id: 1 }); // 沿用上一结果；显式 undefined 与类型 D|null 不符
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('完整 ResponseResult'));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器抛 {message: "boom"} 普通对象时归一化为 -4 / msg="boom"', async () => {
+      mockSuccessResponse({ id: 1 });
+      const fetch = makeFetch();
+      fetch.interceptors.response.use(() => {
+        // 业务 envelope 常见为抛普通对象 Error-like（无 throw 语义的对象），属被测场景
+        // eslint-disable-next-line no-throw-literal
+        throw { message: 'boom' };
+      });
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('boom');
+      expect(result.data).toEqual({ id: 1 }); // 保留响应现场
+      expect(result.error).toEqual({ message: 'boom' }); // 原始异常存于 error
     });
   });
 });

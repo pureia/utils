@@ -503,7 +503,7 @@ describe('createAsyncDedupe', () => {
 
       const promise2 = dedupe('pending-key', func);
 
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise<void>(resolve => queueMicrotask(resolve));
       expect(func).toHaveBeenCalledTimes(1);
 
       resolvePending!('resolved');

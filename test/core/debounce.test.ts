@@ -51,6 +51,26 @@ describe('debounce', () => {
     expect(fn).toHaveBeenCalledTimes(1); // 只执行了首次，flush 不重复
   });
 
+  it('wait 为非有限数字时应抛 RangeError（不交给引擎钳制）', () => {
+    expect(() => debounce(() => {}, Number.NaN)).toThrow(RangeError);
+    expect(() => debounce(() => {}, Infinity)).toThrow(RangeError);
+    expect(() => debounce(() => {}, -Infinity)).toThrow(RangeError);
+  });
+
+  it('leading 窗口过期后新调用覆盖并丢弃旧 pending（不补发）', async () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const d = debounce((n: number) => calls.push(n), 100, { immediate: true });
+    d(1);
+    d(2);
+    await vi.advanceTimersByTimeAsync(100);
+    d(3); // 新窗口：立即执行，覆盖（丢弃）旧 pending
+    expect(calls).toEqual([1, 3]);
+    d.flush(); // 旧 pending 已被覆盖 → no-op
+    expect(calls).toEqual([1, 3]);
+    vi.useRealTimers();
+  });
+
   it('非 immediate（trailing）：窗口结束后执行最后一次调用', () => {
     vi.useFakeTimers();
     const fn = vi.fn();
