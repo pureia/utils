@@ -62,36 +62,36 @@ function createCancelable() {
     asyncFunc: () => T | Promise<T>,
     onCancel?: () => void,
     options?: { isCompleted?: () => boolean }
-  ) =>
-    new Promise<T>((resolve, reject) => {
-      let cancelled = false;
-      const off = eventEmitter.once(key, (error) => {
-        // 完成门闩：工作在取消到达前已完成（结果已在手）时放弃取消，
-        // 监听已在 once 包装内移除，后续 settle 路径正常 resolve 真实结果。
-        if (options?.isCompleted?.()) return;
-        cancelled = true;
-        reject(error);
-        onCancel?.();
-      });
-      // 启动前取消（同一 tick 内的 cancel）短路：工作函数不再启动，副作用不发生；
-      // 已启动的工作不被阻止，继续跑完（结果被丢弃）。
-      // 已取消时短路返回即可：外层 Promise 已被监听器拒绝，resolve-after-reject 为 no-op，
-      // 无需 never-promise 悬挂链。
-      Promise.resolve().then(() => (cancelled ? void 0 : asyncFunc())).then(
-        (result) => {
-          // 落定即清理：监听在结果落定的同一微任务内移除，此后对旧 key 的
-          // cancel 为静默 no-op（不触发 onCancel），isPending 立即为 false
-          off();
-          // 取消短路分支走到此处时外层 Promise 已被拒绝，resolve 为 no-op（result 为 undefined）；
-          // 正常路径 result 恒为 T —— 收窄为 T 的断言在此为真
-          resolve(result as T);
-        },
-        (error) => {
-          off();
-          reject(error);
-        }
-      );
+  ) => new Promise<T>((resolve, reject) => {
+    let cancelled = false;
+    const off = eventEmitter.once(key, (error) => {
+      // 完成门闩：工作在取消到达前已完成（结果已在手）时放弃取消，
+      // 监听已在 once 包装内移除，后续 settle 路径正常 resolve 真实结果。
+      if (options?.isCompleted?.()) return;
+      cancelled = true;
+      reject(error);
+      onCancel?.();
     });
+
+    // 启动前取消（同一 tick 内的 cancel）短路：工作函数不再启动，副作用不发生；
+    // 已启动的工作不被阻止，继续跑完（结果被丢弃）。
+    // 已取消时短路返回即可：外层 Promise 已被监听器拒绝，resolve-after-reject 为 no-op，
+    // 无需 never-promise 悬挂链。
+    Promise.resolve().then(() => (cancelled ? void 0 : asyncFunc())).then(
+      (result) => {
+        // 落定即清理：监听在结果落定的同一微任务内移除，此后对旧 key 的
+        // cancel 为静默 no-op（不触发 onCancel），isPending 立即为 false
+        off();
+        // 取消短路分支走到此处时外层 Promise 已被拒绝，resolve 为 no-op（result 为 undefined）；
+        // 正常路径 result 恒为 T —— 收窄为 T 的断言在此为真
+        resolve(result as T);
+      },
+      (error) => {
+        off();
+        reject(error);
+      }
+    );
+  });
 
   /**
    * 取消当前进行中、以该 key 注册的调用；无进行中注册（key 未知或调用已落定）

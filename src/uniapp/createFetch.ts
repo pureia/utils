@@ -99,7 +99,7 @@ function isResponseResultLike(value: unknown): boolean {
     && typeof v.msg === 'string'
     && typeof v.header === 'object' && v.header !== null
     && Array.isArray(v.cookies)
-    && 'data' in v
+    && 'data' in v && v.data !== undefined // data 允许 null，显式 undefined 与类型 D|null 不符
     && typeof v.requestConfig === 'object' && v.requestConfig !== null;
   // error 可选字段，不做强校验
 }
