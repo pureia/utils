@@ -127,6 +127,13 @@ function createCancelable() {
   });
 
   /**
+   * 是否有进行中的取消调用（落定的同一微任务内即清理，执行落定后立即为 false）
+   * @param key - 取消标识符
+   * @returns 是否有进行中的取消调用
+   */
+  const isPending = (key: PropertyKey) => eventEmitter.has(key);
+
+  /**
    * 取消当前进行中、以该 key 注册的调用；无进行中注册（key 未知或调用已落定）
    * 时为静默 no-op（返回 false）。
    *
@@ -135,17 +142,10 @@ function createCancelable() {
    *   序列内落定，该取消会作废（返回 true 但结果不被覆盖，见 cancelable 竞态仲裁）
    */
   const cancel = (key: PropertyKey) => {
-    if (!eventEmitter.has(key)) return false;
+    if (!isPending(key)) return false;
     eventEmitter.emit(key, new CancelError(key));
     return true;
   };
-
-  /**
-   * 是否有进行中的取消调用（落定的同一微任务内即清理，执行落定后立即为 false）
-   * @param key - 取消标识符
-   * @returns 是否有进行中的取消调用
-   */
-  const isPending = (key: PropertyKey) => eventEmitter.has(key);
 
   return { cancelable, cancel, isPending };
 }
