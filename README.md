@@ -15,6 +15,7 @@ pnpm add @purea/utils
 | `createCancelable` | `@purea/utils/core/createCancelable` | 可取消的异步执行（`cancelable`/`cancel`/`isPending`，支持 `onCancel` 清理回调） |
 | `createAsyncDedupe` | `@purea/utils/core/createAsyncDedupe` | 同键并发调用共享一次执行（`asyncDedupe`/`cancelCall`/`isPending`） |
 | `createEventEmitter` | `@purea/utils/core/createEventEmitter` | 类型安全的事件发布/订阅 |
+| `debounce` | `@purea/utils/core/debounce` | 时间窗防抖（`immediate` 可选 leading/trailing，携带 `cancel`/`flush`） |
 | `stableStringify` | `@purea/utils/core/stableStringify` | 确定性 JSON 序列化（键排序，供去重键哈希等场景） |
 
 ```ts

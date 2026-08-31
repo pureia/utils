@@ -41,6 +41,10 @@
       "types": "./dist/core/createEventEmitter.d.mts",
       "import": "./dist/core/createEventEmitter.mjs"
     },
+    "./core/debounce": {
+      "types": "./dist/core/debounce.d.mts",
+      "import": "./dist/core/debounce.mjs"
+    },
     "./core/stableStringify": {
       "types": "./dist/core/stableStringify.d.mts",
       "import": "./dist/core/stableStringify.mjs"
