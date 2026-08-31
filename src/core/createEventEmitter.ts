@@ -1,5 +1,8 @@
 type Handler<T> = (result: T) => void;
 
+/** once 包装标记：区分"once 自动包装"与普通携带 `.listener` 属性的用户函数，避免 off 扫描误匹配 */
+const ONCE_WRAPPER_MARKER = Symbol('@purea/utils/once-wrapper');
+
 /** 事件键类型 */
 type EventKey<T> = keyof T;
 /** 事件载荷类型 */
@@ -54,9 +57,12 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
     if (!handlers) return;
     const raw = handler as (result: E[EventKey<E>]) => void;
     if (!handlers.delete(raw)) {
-      // 未命中直接引用：按 Node 惯例匹配 once 包装保存的原始引用（wrapper.listener）
+      // 未命中直接引用：按 Node 惯例匹配 once 包装保存的原始引用（wrapper.listener）。
+      // 仅匹配带 ONCE_WRAPPER_MARKER 的包装——普通函数即使恰好携带同名 .listener
+      // 属性也不会被误删（防御性保守：匹配不上即为 no-op）。
       for (const wrapped of handlers) {
-        if ((wrapped as unknown as { listener?: (result: E[EventKey<E>]) => void }).listener === raw) {
+        const w = wrapped as unknown as { listener?: (result: E[EventKey<E>]) => void } & Record<symbol, unknown>;
+        if (w[ONCE_WRAPPER_MARKER] === true && w.listener === raw) {
           handlers.delete(wrapped);
           break;
         }
@@ -88,9 +94,10 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
       off(key, onceHandler as EventHandler<E, K>);
       handler(result);
     }) as (result: E[EventKey<E>]) => void;
-    // 保存原始监听器引用，供 off(key, 原引用) 解包装（对齐 Node EventEmitter）
+    // 保存原始监听器引用与 once 标记，供 off(key, 原引用) 解包装（对齐 Node EventEmitter）
     (onceHandler as unknown as { listener: (result: E[EventKey<E>]) => void }).listener =
       handler as (result: E[EventKey<E>]) => void;
+    (onceHandler as unknown as Record<symbol, unknown>)[ONCE_WRAPPER_MARKER] = true;
     return on(key, onceHandler as EventHandler<E, K>);
   }
 
