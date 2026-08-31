@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `createEventEmitter`：`once` 注册的处理器支持按原引用 `off` 退订（`once` 包装保存原始监听器引用供匹配，对齐 Node EventEmitter 惯例）
+- 测试：`stableStringify` 数组元素 key 与原生一致性回归 2 条（toJSON/replacer 的 key 为字符串索引、根 key 为空字符串）
+- 测试：`createEventEmitter` once 与 off 原引用交互回归 5 条（退订生效 / once 仍只触发一次 / 返回取消函数仍有效 / 双 once 移除其一 / on 语义不变）
+- 测试：`createFetch` 的 `getErrorMessage` 未覆盖路径补 2 条（拦截器抛字符串、抛仅含 `msg` 字段的对象），uniapp 行覆盖达 99.2%
+
 ### Changed
 
 - 公共 API 注释统一重写：补 `CmpFunc`/`ReplacerFunc` 文档、`buildFullConfig` 新增 `@example`，注释改以行为契约级描述并移除全部 ADR 编号引用
-- CONTEXT.md 词表同步：「事件发射器」词条改为与实现一致（处理器抛错统一输出 `console.error`，`onError` 注入已移除）；移除词条中的 ADR 编号引用
+- CONTEXT.md 词表同步：「事件发射器」词条改为与实现一致（处理器抛错统一输出 `console.error`，`onError` 注入已移除）；移除词条中的 ADR 编号引用；补充 once 按原引用退订语义
 - README 轻量修正：`FetchCode` 与 `ResponseResult` 中 `-4` 措辞统一、`buildFullConfig`/`FetchCode` 示例改为子路径导入（与 uni-app 环境警告自洽）、核心工具表补 `onCancel`
+- `createCancelable`：移除启动前取消的 never-promise 悬挂——已取消分支直接短路返回（resolve-after-reject 为 no-op），行为等价、实现与注释简化
+- 测试命名清理：`originalRequestConfig` → `rawRequestConfig`（对齐断言字段）；移除测试名中残留的两处 ADR 编号（aDR 0003/0004 → 描述性名称）
+
+### Fixed
+
+- `stableStringify`：数组元素传给 toJSON/replacer 的 key 由数字索引改为字符串索引，与原生 `JSON.stringify` 行为对齐（此前与"签名与原生 replacer 一致"的注释声明不符）；`ReplacerFunc` 的 `key` 类型由 `string | number` 收窄为 `string`
 
 ### Removed
 
