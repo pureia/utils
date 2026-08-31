@@ -181,7 +181,7 @@ describe('createFetch', () => {
       );
     });
 
-    it('应该在响应结果中保留 originalRequestConfig', async () => {
+    it('应该在响应结果中保留 rawRequestConfig（请求配置原始引用）', async () => {
       mockSuccessResponse({});
 
       const fetch = makeFetch();
@@ -419,6 +419,36 @@ describe('createFetch', () => {
       expect(result.ok).toBe(false);
       expect(result.code).toBe(FetchCode.INTERCEPTOR);
       expect(result.msg).toBe('Unknown Error');
+    });
+
+    it('响应拦截器抛出字符串时 msg 应为该字符串', async () => {
+      mockSuccessResponse({ id: 1 });
+
+      const fetch = makeFetch();
+      fetch.interceptors.response.use(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw 'boom-string';
+      });
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('boom-string');
+    });
+
+    it('响应拦截器抛出仅含有效 msg 字段的对象时 msg 应取 msg 而非 Unknown Error', async () => {
+      mockSuccessResponse({ id: 1 });
+
+      const fetch = makeFetch();
+      fetch.interceptors.response.use(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw { msg: 'only-msg' };
+      });
+
+      const result = await fetch.request({ url: '/users', method: 'GET' });
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.msg).toBe('only-msg');
     });
 
     it('响应拦截器应该支持 async fulfilled', async () => {
@@ -755,7 +785,7 @@ describe('createFetch', () => {
     });
   });
 
-  describe('aDR 0003 修复回归', () => {
+  describe('请求域核心语义回归（合并/同步兜底/整组取消）', () => {
     describe('决策 1 合并语义：header 深合并、其余字段浅覆盖', () => {
       it('请求配置 successStatusCodes 应整体覆盖基础配置（数组按引用替换）', async () => {
         mockSuccessResponse({ id: 1 }, 201);
@@ -913,7 +943,7 @@ describe('createFetch', () => {
     });
   });
 
-  describe('aDR 0004 修复回归', () => {
+  describe('请求域核心语义回归（拦截器改写 key 与链快照）', () => {
     describe('决策 1 取消 key 统一为拦截器处理后的当前配置', () => {
       it('请求拦截器修改 key 后，abort 应按新 key 取消', async () => {
         mockUniRequest.mockImplementation(({ complete }) => {
