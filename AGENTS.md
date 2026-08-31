@@ -10,7 +10,13 @@ Issues live as local markdown files under `.scratch/<feature>/` in this repo. Se
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: one `CONTEXT.md` at the repo root（领域词表 + 行为契约词条；历史 ADR 内容已归档并入 CONTEXT.md，仓库当前无独立 `docs/adr/` 目录）。See `docs/agents/domain.md`.
+
+## 提交规范
+
+- 提交信息使用中文 + conventional commits 前缀：`feat` / `fix` / `chore` / `refactor` / `test` / `docs`。
+- 一个提交一个主题；跨模块但同一主题可合并，无关变更拆开提交。
+- 重大决策（如归档 ADR、移除公共 API）单独提交，并在正文说明动机。
 
 ## Interaction
 

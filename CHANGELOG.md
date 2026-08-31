@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `stableStringify`：数组元素传给 toJSON/replacer 的 key 由数字索引改为字符串索引，与原生 `JSON.stringify` 行为对齐（此前与"签名与原生 replacer 一致"的注释声明不符）；`ReplacerFunc` 的 `key` 类型由 `string | number` 收窄为 `string`
+- `createCancelable`：修复"取消与落定竞态窗口"——工作函数结果已产出（如底层回调已触发）但 settle 清理微任务尚未执行时，`cancel(key)` 不再覆盖已完成的结果；`cancelable` 新增可选 `options.isCompleted` 谓词（非破坏），`createFetch` 在 `uni.request` 的 `complete` 回调内置完成门闩，竞态窗口内 `abort(key)` 返回真实响应而非 `-1`（副作用型请求避免"已执行却报取消"误判）
+- `createFetch`：拦截器返回值运行时校验强化——请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选；原配置含 key 而返回值丢 key 视为非法，保证 `abort(key)` 不失效），响应拦截器须返回完整 `ResponseResult`（ok/code/msg/header/cookies/data/requestConfig），非法返回值告警并沿用上一值
+
+### Docs
+
+- README：新增「请求去重的语义边界」（去重键 = 拦截器前全量配置序列化、等待者不执行拦截器链）、「失败类别速查表」、ESM-only 说明；修正 `lint:fix` 脚本说明
+- CONTEXT.md「取消执行」词条同步 `isCompleted` 谓词语义
+- CHANGELOG 补 `[unreleased]`/`[0.2.0]` 版本链接定义
+- AGENTS.md：Domain docs 修正（`docs/adr/` 已归档并入 CONTEXT.md）、新增「提交规范」一节；`docs/agents/domain.md` 同步
+- 测试：补行为契约用例（取消广播、主动取消跳过响应链、`getErrorMessage` 对象 message 分支、once 抛错自移除、default 导出、BigInt 行为）并统一测试收尾纪律（fake timers、queueMicrotask、try/finally 恢复 spy）
 
 ### Removed
 
@@ -184,6 +194,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增事件存储功能 `useEventStore`，支持全局单例模式
 - 新增异步防抖功能 `useAsyncDebounce`
 
+[unreleased]: https://github.com/pureia/utils/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/pureia/utils/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pureia/utils/compare/v0.0.6...v0.1.0
 [0.0.6]: https://github.com/pureia/utils/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/pureia/utils/compare/v0.0.4...v0.0.5

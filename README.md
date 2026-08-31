@@ -8,6 +8,8 @@
 pnpm add @purea/utils
 ```
 
+> 包为 **ESM-only**（`"type": "module"`，无 CommonJS 产物）：需 ESM 环境或经构建工具（Vite/Webpack 5+/Rolldown）消费；`require()` 直接加载不可用，建议改用动态 `import()`。
+
 ## 核心工具（平台无关）
 
 | 模块 | 导入路径 | 用途 |
@@ -104,6 +106,14 @@ await Promise.all([
 ]);
 ```
 
+### 请求去重的语义边界
+
+`isDedup: true` 时，去重键 = **请求拦截器执行之前**的全量合并配置的稳定序列化哈希（包含 `key`、`data`、`header` 等全部字段）。
+
+- **不同 `key` 不视为相同去重键**：相同 url/data 但 `key` 不同的并发请求会各自发起。
+- **等待者不执行拦截器链**：去重组中只有执行者（首个调用者）运行请求/响应拦截器，等待者直接复用执行者的最终结果——若拦截器带副作用（埋点/计数/token 刷新），等待者的调用在拦截器层面不可见。
+- **去重判定基于拦截器前配置**：拦截器改写请求（如补 token、改 url）不改变去重归组。
+
 ### 统一响应结果
 
 所有请求路径（成功、传输错误、HTTP 错误、业务错误、取消）都归一化为同一结构，**永不 reject、永不同步抛错**：
@@ -121,7 +131,18 @@ export interface ResponseResult<R, D> {
 }
 ```
 
-- 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。
+- 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。校验要求**完整形状**：请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选；原配置含 key 而返回值丢 key 视为非法，保证 `abort(key)` 不失效），响应拦截器须返回完整 `ResponseResult`（缺 `data`/`header`/`cookies` 等字段视为非法）；非法返回值告警并沿用上一值。
+
+### 失败类别速查表
+
+| code | 含义 | 是否进响应链 | `error` 字段 |
+|------|------|--------------|--------------|
+| `successStatusCodes` 内 | 成功响应 | 是 | undefined |
+| 4xx/5xx 等 HTTP 码 | HTTP 错误 | 是 | undefined |
+| `FetchCode.ABORT` (-1) | 主动取消或传输层中止 | 用户主动取消：否；传输层中止：是 | 主动取消时为 `CancelError` 实例；中止时 undefined（`instanceof CancelError` 可区分） |
+| `FetchCode.TIMEOUT` (-2) | 超时 | 是 | undefined |
+| `FetchCode.UNKNOWN` (-3) | 未知/无有效 HTTP 状态 | 是 | undefined |
+| `FetchCode.INTERCEPTOR` (-4) | 拦截器/业务错误、请求未发出的框架错误 | 否 | 原始异常（业务对象或 Error） |
 
 ## 开发
 
@@ -130,7 +151,7 @@ pnpm install
 pnpm dev          # 构建 watch
 pnpm test:watch   # 测试 watch
 pnpm typecheck    # 类型检查
-pnpm lint:check   # lint 检查
+pnpm lint         # lint 检查（lint:fix 自动修复）
 ```
 
 > 本地运行 lint 需要 Node 22+（ESLint 工具链依赖 `Object.groupBy`）；`engines` 声明的 `node >=18` 为运行时契约。
