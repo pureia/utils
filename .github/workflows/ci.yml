@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       # lint 工具链（@purea/eslint-config → @antfu/eslint-config）依赖 Object.groupBy（Node 21+），
-      # 故最小测试版本为 22；engines >=18 为运行时契约（构建产物 target node18）
+      # 故最小测试版本为 22；engines >=18 为运行时契约（构建产物 target node18），由 runtime-18 job 验证
       matrix:
         node: [22, 24]
     steps:
@@ -32,10 +32,59 @@ jobs:
         run: pnpm run typecheck
 
       - name: Lint
-        run: pnpm run lint:check
+        run: pnpm run lint
 
       - name: Coverage (test + 阈值门禁)
         run: pnpm run test:coverage
+
+      - name: Build
+        run: pnpm run build
+
+  runtime-18:
+    # engines >=18 运行时契约验证：类型/测试/构建在最小支持版本上跑一遍；
+    # lint 工具链需 Node 21+，此处跳过
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Coverage (test + 阈值门禁)
+        run: pnpm run test:coverage
+
+      - name: Build
+        run: pnpm run build
+
+  package-check:
+    # publint/attw 是纯包内容/类型检查，与 Node 版本无关，只跑一次即可
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm run build

@@ -72,8 +72,8 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "lint": "eslint --fix .",
-    "lint:check": "eslint .",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
     "prepublishOnly": "pnpm build",
     "typecheck": "tsc --noEmit",
     "publint": "publint",
