@@ -7,9 +7,10 @@ import { createCancelable } from './createCancelable';
  * 其余调用会等待并共享第一次调用的结果（无论是成功还是失败）。
  * 前一次请求完成后，相同 key 的新请求会重新执行。
  *
- * 内部基于 `createCancelable` 实现可取消的异步执行，并以在途注册表（Map）
- * 持有共享执行 promise——执行者与所有等待者拿到同一个 promise 对象，
- * 共享执行落定（成功/失败/取消）后注册表条目立即清理。
+ * 执行者与等待者共享同一个 promise 对象（可观察：`p1 === p2`）；共享执行落定
+ * （成功/失败/取消）后，相同 key 的新调用重新执行。取消语义：`cancelCall(key)`
+ * 取消进行中的调用时，等待者以 `CancelError` 拒绝（核心域契约），调用方以
+ * `instanceof CancelError` 区分主动取消与真实失败。
  *
  * @returns 返回 `{ asyncDedupe, cancelCall, isPending }`，分别表示去重执行函数、
  *   取消进行中调用的函数、在途查询函数

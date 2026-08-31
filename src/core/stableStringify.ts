@@ -21,14 +21,21 @@
  * THE SOFTWARE.
  */
 
+/** 自定义 key 排序比较函数：接收 `{ key, value }` 对（第三个可选参数为按 key 取值函数），返回负数/0/正数决定排序 */
 type CmpFunc = (
   a: { key: string; value: any },
   b: { key: string; value: any },
   getter?: { get: (key: string) => any }
 ) => number;
 
+/** 过滤/转换函数：签名与原生 `JSON.stringify` 的 replacer 一致，返回 `undefined` 时跳过该属性 */
 type ReplacerFunc = (this: any, parent: any, key: string | number, value: any) => any;
 
+/**
+ * `stableStringify` 选项
+ *
+ * 所有字段可选；未提供的选项按原生 `JSON.stringify` 的默认语义处理。
+ */
 interface StableStringifyOptions {
   /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元 */
   space?: string | number;
@@ -52,6 +59,8 @@ interface StableStringifyOptions {
  * - `replacer` 签名为 `(parent, key, value)`，第一个参数是父对象（替代了原生的 `this` 绑定）
  * - 支持 `cycles` 选项将循环引用序列化为 `"__cycle__"` 而非抛错
  * - 空容器（{} / []）恒紧凑输出，与原生一致
+ * - 类数组的整数键（如 `"2"`/`"10"`）不按数值优先排序（原生会将其排在最前），
+ *   与其余键统一按码点序排序；确定性不受影响，但跨工具哈希比对时需注意
  *
  * @param obj - 要序列化的值
  * @param opts - 选项对象，或直接传入 `CmpFunc` 比较函数作为第二个参数

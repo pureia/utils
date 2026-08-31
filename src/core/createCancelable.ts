@@ -57,11 +57,10 @@ class CancelError extends Error {
  * ```
  */
 function createCancelable() {
-  // 已知风险（评估后接受，不做结构防护，见 ADR 0026）：
-  // onCancel 抛错经 emit 的逐 handler 兜底到 console.error；若 console.error 自身抛错
-  // （被 patch、stderr 关闭等），emit 的快照迭代将中断——同 key 广播下剩余注册
-  // 收不到取消事件、promise 悬挂。触发需 onCancel 抛错与 console.error 抛错同时叠加，
-  // 概率极低；createEventEmitter 对处理器抛错统一输出到 console.error（见 ADR 0027）。
+  // 已知风险（评估后接受，不做结构防护）：onCancel 抛错经 emit 的逐 handler 兜底到
+  // console.error；若 console.error 自身抛错（被 patch、stderr 关闭等），emit 的快照
+  // 迭代将中断——同 key 广播下剩余注册收不到取消事件、promise 悬挂。触发需 onCancel
+  // 抛错与 console.error 抛错同时叠加，概率极低；createEventEmitter 对处理器抛错统一输出到 console.error。
   const eventEmitter = createEventEmitter<Record<PropertyKey, CancelError>>();
   /**
    * 包装异步函数为可取消执行
@@ -69,10 +68,10 @@ function createCancelable() {
    * 注册一次性的取消监听器，当同一 key 上触发 `cancel(key)` 时，promise
    * 会被拒绝并抛出 `CancelError`。异步函数完成后（成功或失败）自动清理监听器。
    *
-   * 时序：工作函数经微任务启动，启动前（同一 tick 内）的 `cancel(key)` 使其
-   * 不再启动、副作用不发生（见 ADR 0023）；已启动的工作不被阻止，继续跑完
-   * （结果被丢弃）。取消仅在调用仍处进行中时生效：执行已落定（成功/失败/取消）
-   * 后对旧 key 的 `cancel` 为静默 no-op，不再触发 `onCancel`。
+   * 时序：工作函数经微任务启动，启动前（同一 tick 内）的 `cancel(key)` 使其不再
+   * 启动、副作用不发生；已启动的工作不被阻止，继续跑完（结果被丢弃）。取消仅在
+   * 调用仍处进行中时生效：执行已落定（成功/失败/取消）后对旧 key 的 `cancel`
+   * 为静默 no-op，不再触发 `onCancel`。
    *
    * @typeParam T - 异步函数返回类型
    * @param key - 取消标识符（string | number | symbol），与 `cancel(key)` 配对使用

@@ -12,7 +12,7 @@ pnpm add @purea/utils
 
 | 模块 | 导入路径 | 用途 |
 |------|----------|------|
-| `createCancelable` | `@purea/utils/core/createCancelable` | 可取消的异步执行（`cancel`/`isPending`/`CancelError`） |
+| `createCancelable` | `@purea/utils/core/createCancelable` | 可取消的异步执行（`cancel`/`isPending`/`onCancel`/`CancelError`） |
 | `createAsyncDedupe` | `@purea/utils/core/createAsyncDedupe` | 同键并发调用共享一次执行（`asyncDedupe`/`cancelCall`/`isPending`） |
 | `createEventEmitter` | `@purea/utils/core/createEventEmitter` | 类型安全的事件发布/订阅 |
 | `stableStringify` | `@purea/utils/core/stableStringify` | 确定性 JSON 序列化（键排序，供去重键哈希等场景） |
@@ -33,20 +33,20 @@ await promise.catch((error) => {
 
 ### 其他公共导出
 
-- `buildFullConfig(defaults, requestConfig)`：与 createFetch 内部同源的配置合并函数（公共 API，见 ADR 0013）。合并规则：`header` 按字段深合并（叠加），其余字段请求配置提供即整体替换（数组按引用替换），`rawRequestConfig` 保留请求配置原始引用。
+- `buildFullConfig(defaults, requestConfig)`：与 createFetch 内部同源的配置合并函数（公共 API）。合并规则：`header` 按字段深合并（叠加），其余字段请求配置提供即整体替换（数组按引用替换），`rawRequestConfig` 保留请求配置原始引用。
 
 ```ts
-import { buildFullConfig } from '@purea/utils';
+import { buildFullConfig } from '@purea/utils/uniapp/createFetch';
 
 const defaults = { host: 'https://api.example.com', method: 'GET' as const, header: {}, timeout: 10000, isDedup: false };
 const config = buildFullConfig(defaults, { url: '/users', header: { 'X-Extra': '1' } });
 void config; // header 深合并 => { 'X-Extra': '1' }；rawRequestConfig => 请求配置原引用
 ```
 
-- `FetchCode`：请求域哨兵码常量集（`-1` 中止 / `-2` 超时 / `-3` 未知 / `-4` 拦截器或框架错误）。
+- `FetchCode`：请求域哨兵码常量集（`-1` 中止 / `-2` 超时 / `-3` 未知 / `-4` 拦截器/业务错误,亦承载请求未发出的框架错误）。
 
 ```ts
-import { FetchCode } from '@purea/utils';
+import { FetchCode } from '@purea/utils/uniapp/createFetch';
 
 if (!result.ok && result.code === FetchCode.ABORT) { /* 主动取消或传输层中止 */ }
 ```
@@ -110,7 +110,7 @@ await Promise.all([
 ```ts
 export interface ResponseResult<R, D> {
   ok: boolean; // code 在 successStatusCodes 内为 true
-  code: number; // HTTP 状态码或哨兵码（-1 中止 / -2 超时 / -3 未知 / -4 拦截器错误）
+  code: number; // HTTP 状态码或哨兵码（-1 中止 / -2 超时 / -3 未知 / -4 拦截器/业务错误,亦承载请求未发出的框架错误）
   msg: string; // 状态码描述
   header: Record<string, string>;
   cookies: string[];

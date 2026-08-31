@@ -112,8 +112,9 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
   /**
    * 发布事件，通知所有订阅了该事件的处理程序
    *
-   * 处理程序中的错误会被捕获并输出到 `console.error`，不会影响其他处理程序的执行；
-   * 注意 `console.error` 自身抛错会中断本轮快照迭代（已知风险，见 ADR 0026）。
+   * 处理程序中的错误会被捕获并输出到 `console.error`，不影响其余处理程序的执行；
+   * 注意：`console.error` 自身抛错（被 patch、stderr 关闭等）会中断本轮快照迭代、
+   * 剩余处理器不再执行且异常向 `emit` 调用方传播——该已知风险评估后接受，不做结构防护。
    *
    * @param key - 事件键
    * @param result - 事件载荷

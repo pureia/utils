@@ -137,6 +137,20 @@ type MergedRequestConfig<
  * @param defaults - 默认配置
  * @param requestConfig - 请求配置（url 为必填）
  * @returns 合并后的完整配置（MergedRequestConfig）
+ *
+ * @example
+ * ```ts
+ * const defaults = {
+ *   host: 'https://api.example.com',
+ *   method: 'GET' as const,
+ *   header: { 'Content-Type': 'application/json' },
+ *   timeout: 10000,
+ *   isDedup: false,
+ * };
+ * const config = buildFullConfig(defaults, { url: '/users', header: { Authorization: 'Bearer t' } });
+ * // header 深合并 => { 'Content-Type': 'application/json', Authorization: 'Bearer t' }
+ * // rawRequestConfig 保留请求配置原始引用；method/timeout 等其余字段来自 defaults
+ * ```
  */
 export function buildFullConfig<
   R extends BaseRequestConfig,
@@ -281,7 +295,7 @@ function getStatusCodeMsg(code: number, defaultMsg?: string) {
  * 拦截器管理器，用于管理请求/响应拦截器链
  *
  * 拦截器数组为私有状态：公共面仅暴露 `use` 注册方法，`snapshot()` 仅供 core
- * 入口读取快照（见 ADR 0004 §2/0015）——调用方无法绕过 `use` 直接修改拦截器链。
+ * 入口读取快照——调用方无法绕过 `use` 直接修改拦截器链。
  *
  * @typeParam C - 拦截器处理的数据类型
  * @returns 拦截器管理器实例（use 注册 + snapshot 快照）
@@ -511,7 +525,7 @@ function createFetch<R extends BaseRequestConfig>(
     let fullRequestConfig = config;
     // key 唯一性告警：另一进行中的请求已占用该 key，abort(key) 将同时取消它们
     fullRequestConfig.key && isPending(fullRequestConfig.key) && console.warn(`[createFetch] key "${fullRequestConfig.key}" 已被其他进行中的请求占用，abort(key) 会同时取消所有同 key 请求，请保证并发请求间 key 唯一`);
-    // 拦截器链快照：进入 core 时对请求/响应链一次快照（见 ADR 0004 §2），
+    // 拦截器链快照：进入 core 时对请求/响应链一次快照，
     // 进行中的请求只执行发起时刻已注册的拦截器，执行期间新注册的只影响后续请求
     const requestInterceptorChain = requestManager.snapshot();
     const responseInterceptorChain = responseManager.snapshot();
