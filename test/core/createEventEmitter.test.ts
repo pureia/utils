@@ -308,36 +308,8 @@ describe('createEventEmitter', () => {
     });
   });
 
-  describe('onError injection', () => {
-    it('should call onError with key and error when a handler throws', () => {
-      const onError = vi.fn();
-      const emitter = createEventEmitter<TestEvents>({ onError });
-      emitter.on('user:login', () => { throw new Error('boom'); });
-
-      emitter.emit('user:login', { userId: '1', name: 'John' });
-
-      expect(onError).toHaveBeenCalledTimes(1);
-      const [key, error] = onError.mock.calls[0] as [string, unknown];
-      expect(key).toBe('user:login');
-      expect(error).toBeInstanceOf(Error);
-    });
-
-    it('should not call console.error when onError is provided', () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      try {
-        const emitter = createEventEmitter<TestEvents>({ onError: () => {} });
-        emitter.on('user:login', () => { throw new Error('boom'); });
-
-        emitter.emit('user:login', { userId: '1', name: 'John' });
-
-        expect(errorSpy).not.toHaveBeenCalled();
-      }
-      finally {
-        errorSpy.mockRestore();
-      }
-    });
-
-    it('should keep default console.error behavior when no onError is provided', () => {
+  describe('handler throw error handling', () => {
+    it('should keep default console.error behavior when a handler throws', () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
         const emitter = createEventEmitter<TestEvents>();
@@ -346,6 +318,24 @@ describe('createEventEmitter', () => {
         emitter.emit('user:login', { userId: '1', name: 'John' });
 
         expect(errorSpy).toHaveBeenCalledTimes(1);
+      }
+      finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    it('should not affect other handlers when a handler throws', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const emitter = createEventEmitter<TestEvents>();
+        const h2 = vi.fn();
+        emitter.on('user:login', () => { throw new Error('boom'); });
+        emitter.on('user:login', h2);
+
+        emitter.emit('user:login', { userId: '1', name: 'John' });
+
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(h2).toHaveBeenCalledTimes(1);
       }
       finally {
         errorSpy.mockRestore();
