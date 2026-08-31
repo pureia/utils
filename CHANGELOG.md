@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 公共 API 注释统一重写：补 `CmpFunc`/`ReplacerFunc` 文档、`buildFullConfig` 新增 `@example`，注释改以行为契约级描述并移除全部 ADR 编号引用
+- `createCancelable`：可选参数合并为 options 对象——`cancelable(key, fn, onCancel?, options?)` 改为 `cancelable(key, fn, options?: { onCancel?, isCompleted? })`（破坏性签名调整，0.x 未使用阶段；调用方如需 isCompleted 不再传 undefined 占位）
 - CONTEXT.md 词表同步：「事件发射器」词条改为与实现一致（处理器抛错统一输出 `console.error`，`onError` 注入已移除）；移除词条中的 ADR 编号引用；补充 once 按原引用退订语义
 - README 轻量修正：`FetchCode` 与 `ResponseResult` 中 `-4` 措辞统一、`buildFullConfig`/`FetchCode` 示例改为子路径导入（与 uni-app 环境警告自洽）、核心工具表补 `onCancel`
 - `createCancelable`：移除启动前取消的 never-promise 悬挂——已取消分支直接短路返回（resolve-after-reject 为 no-op），行为等价、实现与注释简化

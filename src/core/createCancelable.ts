@@ -47,10 +47,10 @@ function createCancelable() {
    * @typeParam T - 异步函数返回类型
    * @param key - 取消标识符，与 `cancel(key)` 配对使用
    * @param asyncFunc - 要执行的异步函数
-   * @param onCancel - 可选，取消时执行的清理回调（如底层 API 的 abort）；
-   *   任何一次真实取消都会触发；其抛错不影响取消结果
    * @param options - 可选配置
-   * @param options.isCompleted - 可选，判断"工作是否已完成"的谓词。工作函数的结果
+   * @param options.onCancel - 取消时执行的清理回调（如底层 API 的 abort）；
+   *   任何一次真实取消都会触发；其抛错不影响取消结果
+   * @param options.isCompleted - 判断"工作是否已完成"的谓词。工作函数的结果
    *   已产出（如底层回调已触发）但 settle 清理微任务尚未执行时，`cancel(key)` 可能
    *   先于清理到达；提供该谓词（与结果产出同步置真的门闩）可让取消**放弃覆盖**，
    *   最终 resolve 真实结果。默认不提供：该窗口内 cancel 仍以 `CancelError` 拒绝
@@ -60,8 +60,7 @@ function createCancelable() {
   const cancelable = <T>(
     key: PropertyKey,
     asyncFunc: () => T | Promise<T>,
-    onCancel?: () => void,
-    options?: { isCompleted?: () => boolean }
+    options?: { onCancel?: () => void; isCompleted?: () => boolean }
   ) => new Promise<T>((resolve, reject) => {
     let cancelled = false;
     const off = eventEmitter.once(key, (error) => {
@@ -70,7 +69,7 @@ function createCancelable() {
       if (options?.isCompleted?.()) return;
       cancelled = true;
       reject(error);
-      onCancel?.();
+      options?.onCancel?.();
     });
 
     // 启动前取消（同一 tick 内的 cancel）短路：工作函数不再启动，副作用不发生；

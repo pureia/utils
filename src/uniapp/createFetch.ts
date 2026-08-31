@@ -471,7 +471,7 @@ function createFetch<R extends BaseRequestConfig>(
     });
 
     return key
-      ? cancelable(key, () => responsePromise, () => requestTask?.abort(), { isCompleted: () => completed })
+      ? cancelable(key, () => responsePromise, { onCancel: () => requestTask?.abort(), isCompleted: () => completed })
       : responsePromise;
   };
 

@@ -26,7 +26,7 @@
 
 ## 核心工具域（core utilities）
 
-- **取消执行（cancelable execution）**：`cancelable(key, fn, onCancel?)` 包装的异步执行——`cancel(key)` 触发时以 `CancelError` 拒绝执行结果并调用 `onCancel` 清理；执行结束（成功/失败/取消）后取消监听自动清理；未知 key 的 `cancel` 为静默 no-op。工作函数经微任务启动，启动前（同一 tick 内）的 `cancel` 使其不再启动、副作用不发生；已启动的工作不被阻止，继续跑完（结果被丢弃）。同一 key 的多次并发注册互不感知：`cancel(key)` 广播到该 key 下全部进行中的注册（各自收到 `CancelError`），核心域不做占用告警（告警为请求域行为，见请求域「取消」词条）。**取消与落定的微任务竞态窗口**：工作函数结果已产出（如底层回调已触发）但结算清理微任务尚未执行时，`cancel(key)` 仍会命中监听器并拒绝结果（既定契约）；可通过 `options.isCompleted` 谓词（与结果产出同步置真的门闩）让已完成的执行不被取消覆盖、最终 resolve 真实结果（请求域在 `complete` 回调内置完成门闩，同一 tick 内竞态窗口中 `abort` 返回真实响应）。请求域的 `abort(key)` 是其在请求场景的应用（另见请求域「取消」词条）。
+- **取消执行（cancelable execution）**：`cancelable(key, fn, options?)` 包装的异步执行——`cancel(key)` 触发时以 `CancelError` 拒绝执行结果并调用 `options.onCancel` 清理；执行结束（成功/失败/取消）后取消监听自动清理；未知 key 的 `cancel` 为静默 no-op。工作函数经微任务启动，启动前（同一 tick 内）的 `cancel` 使其不再启动、副作用不发生；已启动的工作不被阻止，继续跑完（结果被丢弃）。同一 key 的多次并发注册互不感知：`cancel(key)` 广播到该 key 下全部进行中的注册（各自收到 `CancelError`），核心域不做占用告警（告警为请求域行为，见请求域「取消」词条）。**取消与落定的微任务竞态窗口**：工作函数结果已产出（如底层回调已触发）但结算清理微任务尚未执行时，`cancel(key)` 仍会命中监听器并拒绝结果（既定契约）；可通过 `options.isCompleted` 谓词（与结果产出同步置真的门闩）让已完成的执行不被取消覆盖、最终 resolve 真实结果（请求域在 `complete` 回调内置完成门闩，同一 tick 内竞态窗口中 `abort` 返回真实响应）。请求域的 `abort(key)` 是其在请求场景的应用（另见请求域「取消」词条）。
 - **取消错误（CancelError）**：主动取消的标识错误；`instanceof CancelError` 是区分「主动取消」与「真实失败」的唯一依据（请求域中该实例存于结果 `error` 字段）。
 - **异步去重（async deduplication）**：同一去重键的并发调用共享一次执行——第一个调用者为执行者（executor），后续为等待者（waiter）；所有调用者获得同一结果（含失败）；前一次执行结束后，同键的新调用重新执行。`cancelCall(key)` 取消进行中调用时，等待者收到 `CancelError` 拒绝（核心域契约；请求域的去重请求经错误归一化后不拒绝，见请求域「去重」词条）。
 - **进行中查询（isPending）**：`isPending(key)` 返回该 key 当前是否存在未落定的去重组；从首个调用者发起（含共享执行尚未起跑的窗口）至共享执行落定之前为 `true`，落定后为 `false`；同 key 串行复用无残留标记。

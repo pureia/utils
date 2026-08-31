@@ -50,7 +50,7 @@ describe('createCancelable', () => {
     it('isCompleted 谓词为真时 cancel 不覆盖已完成的执行', async () => {
       const { cancelable: c, cancel } = createCancelable();
       let completed = false;
-      const promise = c('completed-key', () => Promise.resolve('ok'), undefined, {
+      const promise = c('completed-key', () => Promise.resolve('ok'), {
         isCompleted: () => completed,
       });
       completed = true; // 模拟工作已完成（如 HTTP complete 已触发、结果已在手）
@@ -133,7 +133,7 @@ describe('createCancelable', () => {
       const onCancel = vi.fn();
       const neverResolving = new Promise(() => {});
 
-      const promise = c('key', () => neverResolving, onCancel);
+      const promise = c('key', () => neverResolving, { onCancel });
       cancel('key');
 
       await expect(promise).rejects.toBeInstanceOf(CancelError);
@@ -144,7 +144,7 @@ describe('createCancelable', () => {
       const { cancelable: c } = createCancelable();
       const onCancel = vi.fn();
 
-      await c('key', () => Promise.resolve('ok'), onCancel);
+      await c('key', () => Promise.resolve('ok'), { onCancel });
 
       expect(onCancel).not.toHaveBeenCalled();
     });
@@ -154,7 +154,7 @@ describe('createCancelable', () => {
       const onCancel = vi.fn();
       const error = new Error('fail');
 
-      await expect(c('key', () => Promise.reject(error), onCancel)).rejects.toBe(error);
+      await expect(c('key', () => Promise.reject(error), { onCancel })).rejects.toBe(error);
       expect(onCancel).not.toHaveBeenCalled();
     });
   });
