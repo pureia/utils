@@ -54,8 +54,10 @@ interface StableStringifyOptions {
  * - 类数组整数键（如 `"2"`/`"10"`）不按数值优先排序（原生会将其排在最前），
  *   与其余键统一按码点序排序——确定性不受影响，但跨工具哈希比对时需注意
  *
+ * 重载：第二参数要么是选项对象，要么是自定义比较函数，二者互斥（运行时按 typeof 判别）。
+ *
  * @param obj - 要序列化的值
- * @param opts - 选项对象，或直接传 `CmpFunc` 作为第二个参数
+ * @param opts - 选项对象；也可直接传自定义比较函数（见重载，等价于 `opts.cmp` 的快捷形式）
  * @returns 稳定的 JSON 字符串；顶层值为 `undefined` 时返回 `undefined`
  * @throws {TypeError} 遇循环引用且 `cycles` 未启用时
  *
@@ -69,7 +71,9 @@ interface StableStringifyOptions {
  * stableStringify(obj, { cycles: true });
  * // => '{"a":1,"self":"__cycle__"}'
  */
-function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
+function stableStringify(obj: any, opts?: StableStringifyOptions): string | undefined;
+function stableStringify(obj: any, cmp: CmpFunc): string | undefined;
+function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): string | undefined {
   const isObj = opts != null && typeof opts === 'object';
 
   // 缩进对齐原生 JSON.stringify 语义：
@@ -107,9 +111,23 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc) {
 
   const seen = new Set<object>();
 
+  // 缩进/分隔符仅由 space 决定，提升为调用级常量并按需缓存（避免大对象深层嵌套下
+  // 每个节点重复 space.repeat(level) 的字符串分配；原生 JSON.stringify 同样缓存）
+  const indentCache = space ? new Map<number, string>() : null;
+  const colonSeparator = space ? ': ' : ':';
+
   function stringify(parent: any, key: string, node: any, level: number): string | undefined {
-    const indent = space ? `\n${space.repeat(level)}` : '';
-    const colonSeparator = space ? ': ' : ':';
+    let indent = '';
+    if (space) {
+      const cached = indentCache!.get(level);
+      if (cached !== undefined) {
+        indent = cached;
+      }
+      else {
+        indent = `\n${space.repeat(level)}`;
+        indentCache!.set(level, indent);
+      }
+    }
 
     if (node && typeof node.toJSON === 'function') {
       node = node.toJSON(key);
