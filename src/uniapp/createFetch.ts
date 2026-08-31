@@ -70,19 +70,38 @@ interface ResponseResult<R, D> {
   error?: unknown;
 }
 
-/** 类型守卫：判断值是否为合法的请求配置（请求拦截器返回值运行时校验） */
+/** 类型守卫：判断值是否为合法的完整请求配置（请求拦截器返回值运行时校验） */
 function isRequestConfigLike(value: unknown): boolean {
-  // 校验拼接 URL 的关键字段 url 与 host：缺任一都会产出畸形请求（如 `undefined${url}`）
-  return typeof value === 'object' && value !== null
-    && typeof (value as { url?: unknown }).url === 'string'
-    && typeof (value as { host?: unknown }).host === 'string';
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  // 请求拦截器返回的是完整合并配置（整体替换语义），关键字段必须齐全；
+  // 缺 url/host 会产出畸形 URL，缺 method/header/timeout/isDedup 会被平台按默认值
+  // 静默处理而破坏调用方语义（尤其丢 key 会使 abort(key) 失效、请求无法取消）
+  return typeof v.url === 'string'
+    && typeof v.host === 'string'
+    && typeof v.method === 'string'
+    && typeof v.header === 'object' && v.header !== null
+    && typeof v.timeout === 'number'
+    && typeof v.isDedup === 'boolean'
+    && (v.key === undefined || typeof v.key === 'string');
+  // data 任意；successStatusCodes 可选数组（非必填不做强校验）
 }
 
 /** 类型守卫：判断值是否为合法的统一响应结果（响应拦截器返回值运行时校验） */
 function isResponseResultLike(value: unknown): boolean {
-  return typeof value === 'object' && value !== null
-    && typeof (value as { ok?: unknown }).ok === 'boolean'
-    && typeof (value as { code?: unknown }).code === 'number';
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  // 响应拦截器返回的是完整 ResponseResult（整体替换语义）：仅校验 ok/code 会让
+  // 缺 data/header/cookies/msg/requestConfig 的返回值冒充合法结果（data 运行时
+  // undefined 与类型 `D | null` 不符），故按完整形状校验
+  return typeof v.ok === 'boolean'
+    && typeof v.code === 'number'
+    && typeof v.msg === 'string'
+    && typeof v.header === 'object' && v.header !== null
+    && Array.isArray(v.cookies)
+    && 'data' in v
+    && typeof v.requestConfig === 'object' && v.requestConfig !== null;
+  // error 可选字段，不做强校验
 }
 
 /**
@@ -409,6 +428,10 @@ function createFetch<R extends BaseRequestConfig>(
     const { host, url, method, header, timeout, data, key } = fullRequestConfig;
 
     let requestTask: UniApp.RequestTask | undefined;
+    // 完成门闩：uni.request 的 complete 回调与 responsePromise 的 resolve 同步触发，
+    // 该标记作为"取消/完成竞态窗口"的判定依据——窗口内到达的 abort(key) 不再覆盖
+    // 已完成的结果（核心工具域语义见 createCancelable 的 options.isCompleted）。
+    let completed = false;
 
     // responsePromise 只负责将 uni.request 的 complete 回调桥接为 Promise；
     // 取消逻辑完全由外层 cancelable 处理，因此不需要 reject 参数。
@@ -421,6 +444,7 @@ function createFetch<R extends BaseRequestConfig>(
         // data 类型为 unknown（见 RequestConfig），传平台时按 uni.request 签名收窄
         data: data as UniApp.RequestOptions['data'],
         complete(result) {
+          completed = true;
           const {
             data: respData,
             header: respHeader,
@@ -446,7 +470,9 @@ function createFetch<R extends BaseRequestConfig>(
       });
     });
 
-    return key ? cancelable(key, () => responsePromise, () => requestTask?.abort()) : responsePromise;
+    return key
+      ? cancelable(key, () => responsePromise, () => requestTask?.abort(), { isCompleted: () => completed })
+      : responsePromise;
   };
 
   /**
@@ -471,11 +497,16 @@ function createFetch<R extends BaseRequestConfig>(
     for (const onFulfilled of requestInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullRequestConfig));
-        // 运行时校验：请求拦截器必须返回合法的请求配置，
-        // 非法（如漏 return、缺 url/host）则告警并沿用上一配置，避免后续拼出 `undefined${url}`
-        // 畸形 URL 或在读取 .key 处抛晦涩 TypeError。
+        // 运行时校验：请求拦截器必须返回合法的完整请求配置（url/host/method/header/
+        // timeout/isDedup，key 可选），非法（如漏 return、缺字段）则告警并沿用上一配置，
+        // 避免拼出畸形 URL 或在读取 .key 处抛晦涩 TypeError；丢 key 会使 abort(key) 失效
         if (!isRequestConfigLike(interceptorResult)) {
-          console.warn('[createFetch] 请求拦截器必须返回请求配置（含 url 与 host 字段），非法返回值已被忽略');
+          console.warn('[createFetch] 请求拦截器必须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选），非法返回值已被忽略并沿用上一配置');
+        }
+        // key 为可选字段，形状校验拦不住"丢弃"：原配置带有 key 而拦截器返回值丢 key 时，
+        // 该请求会从 abort 体系脱落（abort(key) 变 no-op），视为非法并沿用上一配置
+        else if (fullRequestConfig.key !== undefined && interceptorResult.key === undefined) {
+          console.warn('[createFetch] 请求拦截器返回的配置丢失了 key，该请求将无法被 abort(key) 取消，已沿用上一配置');
         }
         else {
           fullRequestConfig = interceptorResult;
@@ -493,7 +524,8 @@ function createFetch<R extends BaseRequestConfig>(
       fullResponseResult = await dispatchRequest<D>(fullRequestConfig);
     }
     catch (error) {
-      // dispatchRequest 的 reject 仅来自 uni.request 同步抛错（请求未发出的框架错误），归一化为 -4
+      // dispatchRequest 的 reject 两个来源：uni.request 同步抛错（请求未发出的框架错误，
+      // 归一化为 -4）与取消（cancelable 以 CancelError 拒绝，归一化为 -1）；二者由 normalizeError 区分
       return normalizeError<D>(error, undefined, fullRequestConfig);
     }
 
@@ -501,14 +533,16 @@ function createFetch<R extends BaseRequestConfig>(
     for (const onFulfilled of responseInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullResponseResult));
-        // 运行时校验：响应拦截器必须返回合法的统一响应结果，否则告警并沿用上一结果，
-        // 避免类型谎言沿拦截器链扩散（如需"解包"，应改写 ResponseResult.data 而非返回裸数据）。
+        // 运行时校验：响应拦截器必须返回完整的统一响应结果（ok/code/msg/header/cookies/
+        // data/requestConfig），否则告警并沿用上一结果，避免类型谎言沿拦截器链扩散
+        // （如需"解包"，应改写 ResponseResult.data 而非返回裸数据）。
         if (!isResponseResultLike(interceptorResult)) {
-          console.warn('[createFetch] 响应拦截器必须返回 ResponseResult（含 ok/code 字段），非法返回值已被忽略');
+          console.warn('[createFetch] 响应拦截器必须返回完整 ResponseResult（ok/code/msg/header/cookies/data/requestConfig），非法返回值已被忽略并沿用上一结果');
         }
         else {
-          // 边界断言：返回值已通过 isResponseResultLike 运行时形状校验（ok/code），
-          // data 类型由拦截器决定（unknown 需自行收窄），收窄到当前请求泛型 D 为边界职责
+          // 边界断言：返回值已通过 isResponseResultLike 完整形状校验（ok/code/msg/header/
+          // cookies/data/requestConfig），data 类型由拦截器决定（unknown 需自行收窄），
+          // 收窄到当前请求泛型 D 为边界职责
           fullResponseResult = interceptorResult as ResponseResult<FullRequestConfig, D>;
         }
       }
@@ -572,6 +606,13 @@ function createFetch<R extends BaseRequestConfig>(
      * 按 key 取消请求：key 下所有进行中的注册（拦截器阶段与传输层）统一归一化为
      * `code: -1`；未知 key 为静默 no-op。取消只丢弃未落定的结果，不打断已进入的
      * 拦截器代码执行；并发请求间应保证 key 唯一，否则互为取消组。
+     *
+     * 取消机制三层分工（实现注记）：
+     * - 外层 `createCancelable`：执行期取消（拦截器/传输层，`cancel(key)` 广播）；
+     * - `cancelIntentEmitter`：起跑前取消意向（去重共享执行尚未起跑的同一 tick 内
+     *   `abort` 短路，请求不发出；非去重路径同 tick abort 只能中止已发出的传输层）；
+     * - `asyncDedupe` 组取消：去重请求 `abort(key)` 为整组取消（执行者与等待者同收 -1）。
+     * 网络层请求已完成（`complete` 已触发）时，取消不再覆盖结果（见 dispatchRequest 的完成门闩）。
      */
     abort(key: string) {
       cancel(key); // 执行期取消（拦截器/传输层，现有路径）

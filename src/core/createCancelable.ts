@@ -49,12 +49,26 @@ function createCancelable() {
    * @param asyncFunc - 要执行的异步函数
    * @param onCancel - 可选，取消时执行的清理回调（如底层 API 的 abort）；
    *   任何一次真实取消都会触发；其抛错不影响取消结果
+   * @param options - 可选配置
+   * @param options.isCompleted - 可选，判断"工作是否已完成"的谓词。工作函数的结果
+   *   已产出（如底层回调已触发）但 settle 清理微任务尚未执行时，`cancel(key)` 可能
+   *   先于清理到达；提供该谓词（与结果产出同步置真的门闩）可让取消**放弃覆盖**，
+   *   最终 resolve 真实结果。默认不提供：该窗口内 cancel 仍以 `CancelError` 拒绝
+   *   （结果被丢弃，既有时序契约）。
    * @returns 异步函数的执行结果（取消时 promise 以 `CancelError` 拒绝）
    */
-  const cancelable = <T>(key: PropertyKey, asyncFunc: () => T | Promise<T>, onCancel?: () => void) =>
+  const cancelable = <T>(
+    key: PropertyKey,
+    asyncFunc: () => T | Promise<T>,
+    onCancel?: () => void,
+    options?: { isCompleted?: () => boolean }
+  ) =>
     new Promise<T>((resolve, reject) => {
       let cancelled = false;
       const off = eventEmitter.once(key, (error) => {
+        // 完成门闩：工作在取消到达前已完成（结果已在手）时放弃取消，
+        // 监听已在 once 包装内移除，后续 settle 路径正常 resolve 真实结果。
+        if (options?.isCompleted?.()) return;
         cancelled = true;
         reject(error);
         onCancel?.();
