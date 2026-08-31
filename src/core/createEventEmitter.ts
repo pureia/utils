@@ -11,12 +11,11 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * 创建一个类型安全的事件发射器实例，用于事件的发布/订阅管理。
  *
  * 支持 `on` 持续订阅和 `once` 一次性订阅，所有事件键和载荷均为类型安全。
- * 同一事件可注册多个处理程序，处理程序中的错误不会影响其他处理程序的执行。
+ * 同一事件可注册多个处理程序，处理程序中的错误会被捕获并输出到 `console.error`，
+ * 不会影响其他处理程序的执行。
  * 订阅函数会返回取消订阅函数，方便在组件卸载时清理。
  *
  * @typeParam E - 事件定义对象，键为事件名，值为事件载荷类型
- * @param options - 可选配置
- * @param options.onError - 处理程序抛错时的回调，默认使用 `console.error` 输出
  * @returns 事件发射器实例
  *
  * @example
@@ -41,14 +40,8 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * emitter.emit('count', 2); // 无输出（已自动取消）
  * ```
  */
-function createEventEmitter<E extends Record<string, any> = Record<string, unknown>>(
-  options?: { onError?: (key: EventKey<E>, error: unknown) => void }
-) {
+function createEventEmitter<E extends Record<string, any> = Record<string, unknown>>() {
   const store = new Map<EventKey<E>, Set<(result: E[EventKey<E>]) => void>>();
-  /** 处理程序抛错时的默认兜底：沿用原有控制台格式 */
-  const onError = options?.onError ?? ((key: EventKey<E>, error: unknown) => {
-    console.error(`createEventEmitter error in "${String(key)}":`, error);
-  });
 
   /**
    * 获取所有已注册的事件键
@@ -119,8 +112,8 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
   /**
    * 发布事件，通知所有订阅了该事件的处理程序
    *
-   * 处理程序中的错误会被捕获并交给 `onError`（默认输出到控制台），不会影响其他处理程序的执行；
-   * 注意 `onError` 自身抛错会中断剩余处理器并向 emit 调用方传播（注入方责任）。
+   * 处理程序中的错误会被捕获并输出到 `console.error`，不会影响其他处理程序的执行；
+   * 注意 `console.error` 自身抛错会中断本轮快照迭代（已知风险，见 ADR 0026）。
    *
    * @param key - 事件键
    * @param result - 事件载荷
@@ -135,7 +128,7 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
         handler(result);
       }
       catch (error) {
-        onError(key, error);
+        console.error(`createEventEmitter error in "${String(key)}":`, error);
       }
     });
   }
