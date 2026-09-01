@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       # lint 工具链（@purea/eslint-config → @antfu/eslint-config）依赖 Object.groupBy（Node 21+），
-      # 故最小测试版本为 22；engines >=18 为运行时契约（构建产物 target node18），由 runtime-18 job 验证
+      # 故最小测试版本为 22；engines >=20.19 为运行时契约（构建产物 target node20），由 runtime-20 job 验证
       matrix:
         node: [22, 24]
     steps:
@@ -40,8 +40,8 @@ jobs:
       - name: Build
         run: pnpm run build
 
-  runtime-18:
-    # engines >=18 运行时契约验证：类型/测试/构建在最小支持版本上跑一遍；
+  runtime-20:
+    # engines >=20.19 运行时契约验证：类型/测试/构建在最小支持版本上跑一遍；
     # lint 工具链需 Node 21+，此处跳过
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +53,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: pnpm
 
       - name: Install dependencies

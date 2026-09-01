@@ -5,5 +5,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   unbundle: true,
-  target: 'node18',
+  target: 'node20',
 });

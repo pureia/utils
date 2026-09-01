@@ -154,7 +154,7 @@ pnpm typecheck    # 类型检查
 pnpm lint         # lint 检查（lint:fix 自动修复）
 ```
 
-> 本地运行 lint 需要 Node 22+（ESLint 工具链依赖 `Object.groupBy`）；`engines` 声明的 `node >=18` 为运行时契约。
+> 本地运行 lint 需要 Node 22+（ESLint 工具链依赖 `Object.groupBy`）；`engines` 声明的 `node >=20.19` 为运行时契约。
 
 ## License
 
