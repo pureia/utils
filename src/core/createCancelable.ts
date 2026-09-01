@@ -67,8 +67,8 @@ function createCancelable() {
    *
    * @typeParam T - 异步函数返回类型
    * @param key - 取消标识符，与 `cancel(key)` 配对使用
-   * @param asyncFunc - 要执行的异步函数，须返回可等待值（Promise/thenable）；
-   *   同步返回值/非可等待值为契约违规，调用以 `TypeError` 拒绝（消息含收到的类型）；
+   * @param asyncFunc - 要执行的异步函数，须返回原生 Promise；thenable、跨 realm
+   *   或 polyfill Promise（如 Bluebird）为契约违规，调用以 `TypeError` 拒绝；
    *   同步抛错仍以原始错误拒绝
    * @param options - 可选配置
    * @param options.onCancel - 取消时执行的清理回调（如底层 API 的 abort）；
@@ -84,7 +84,6 @@ function createCancelable() {
     options?: { onCancel?: () => void }
   ) => new Promise<T>((resolve, reject) => {
     const execution: Execution = { state: 'scheduled', cancelSignaled: false };
-
     // 取消信号：同步标记 + 延后裁决（与结算门闩仲裁，见上方时序契约）。
     // once 触发即自清理——此后对该 key 的 cancel 为静默 no-op
     const off = eventEmitter.once(key, (error) => {
@@ -97,7 +96,7 @@ function createCancelable() {
       });
     });
 
-    // 落定的统一出口：成功、失败、取消仲裁均经此处转移状态并清理注册
+    // 落定的统一出口：成功、失败、契约违规、取消仲裁均经此处转移状态并清理注册
     const settleResolve = (value: T) => {
       execution.state = 'settled';
       off();
@@ -113,27 +112,16 @@ function createCancelable() {
     Promise.resolve().then(() => {
       if (execution.cancelSignaled) return;
       execution.state = 'running';
-      let ret: Promise<T>;
-      try {
-        ret = asyncFunc();
-      }
-      catch (error) {
-        settleReject(error); // 同步抛错：视为立即落定，拒绝原始错误
-        return;
-      }
-      try {
-        // 契约：仅支持返回可等待值（Promise/thenable）的异步函数——
-        // 单次 get 后校验（对齐原生采纳语义），非可等待值以 TypeError 拒绝
-        const then = (ret as PromiseLike<T> | null | undefined)?.then;
-        if (typeof then !== 'function') {
-          settleReject(new TypeError(`${String(key)} async call must return a thenable value (received ${typeof ret})`));
-          return;
-        }
-        then.call(ret as PromiseLike<T>, settleResolve, settleReject);
-      }
-      catch (error) {
-        settleReject(error); // then get/call 抛错（如 then 属性 getter）：按落定失败拒绝
-      }
+      let result: Promise<T>;
+      try { result = asyncFunc(); }
+      // 同步抛错：视为立即落定，拒绝原始错误
+      catch (error) { return settleReject(error); }
+      // 契约校验：仅支持原生 Promise——thenable、跨 realm/polyfill Promise
+      // （如 Bluebird 实例）均为契约违规，以 TypeError 拒绝
+      if (!(result instanceof Promise)) return settleReject(new TypeError(`${String(key)} async call must return a Promise`));
+      try { result.then(settleResolve, settleReject); }
+      // 异常 then（如 Proxy 包装的 Promise）按落定失败拒绝
+      catch (error) { settleReject(error); }
     });
   });
 

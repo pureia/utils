@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `createCancelable`：`cancelable` 的 `asyncFunc` 签名收窄为 `() => Promise<T>`——仅支持返回可等待值（Promise/thenable）的异步函数；同步返回值/非可等待值为契约违规，调用以 `TypeError` 拒绝（消息含收到的类型；thenable 仍受支持；破坏性签名调整，0.x 未使用阶段）
+- `createCancelable`：`cancelable` 的 `asyncFunc` 签名收窄为 `() => Promise<T>`——仅支持返回原生 Promise 的异步函数；同步返回值、thenable、跨 realm/polyfill Promise（如 Bluebird）均为契约违规，调用以 `TypeError` 拒绝（破坏性签名调整，0.x 未使用阶段）
 - `createAsyncDedupe`：`asyncDedupe` 的 `asyncFunc` 签名同步收窄为 `() => Promise<V>`（与「取消执行」契约一致；破坏性签名调整，0.x 未使用阶段）
 - 公共 API 注释统一重写：补 `CmpFunc`/`ReplacerFunc` 文档、`buildFullConfig` 新增 `@example`，注释改以行为契约级描述并移除全部 ADR 编号引用
 - CONTEXT.md 词表同步：「事件发射器」词条改为与实现一致（处理器抛错统一输出 `console.error`，`onError` 注入已移除）；移除词条中的 ADR 编号引用；补充 once 按原引用退订语义

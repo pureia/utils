@@ -11,12 +11,12 @@ describe('createCancelable', () => {
       expect(result).toBe(42);
     });
 
-    it('同步返回非可等待值应拒绝 TypeError（仅支持异步函数）', async () => {
+    it('同步返回非 Promise 值应拒绝 TypeError（仅支持异步函数）', async () => {
       const { cancelable } = createCancelable();
       // 类型层 lie：模拟非法调用方（JS 调用方或强转）
       const promise = cancelable('key1', () => 42 as unknown as Promise<number>);
       await expect(promise).rejects.toBeInstanceOf(TypeError);
-      await expect(promise).rejects.toThrow('must return a thenable value');
+      await expect(promise).rejects.toThrow('must return a Promise');
     });
 
     it('契约违规拒绝（非取消）不应触发 onCancel', async () => {
@@ -39,15 +39,17 @@ describe('createCancelable', () => {
       await expect(cancelable('sync-throw', () => { throw error; })).rejects.toBe(error);
     });
 
-    it('thenable 的 then 访问/调用抛错应按落定失败拒绝', async () => {
+    it('thenable（非原生 Promise）应拒绝 TypeError（仅支持原生 Promise）', async () => {
       const { cancelable } = createCancelable();
-      // 对齐原生 Promise 采纳语义：then 属性 getter 抛错视为 thenable 自身失败
+      // 契约只认原生 Promise：thenable 无论 then 是否可抛错，一律以 TypeError 拒绝
       const badGetter = Object.defineProperty({}, 'then', {
         get() { throw new Error('broken then getter'); },
       });
-      await expect(cancelable('bad-getter', () => badGetter as any)).rejects.toThrow('broken then getter');
+      await expect(cancelable('bad-getter', () => badGetter as any)).rejects.toBeInstanceOf(TypeError);
+      await expect(cancelable('bad-getter', () => badGetter as any)).rejects.toThrow('must return a Promise');
       const badCall: any = { then: () => { throw new Error('broken then call'); } };
-      await expect(cancelable('bad-call', () => badCall)).rejects.toThrow('broken then call');
+      await expect(cancelable('bad-call', () => badCall)).rejects.toBeInstanceOf(TypeError);
+      await expect(cancelable('bad-call', () => badCall)).rejects.toThrow('must return a Promise');
     });
   });
 

@@ -515,7 +515,7 @@ describe('createAsyncDedupe', () => {
   });
 
   describe('边界情况和极端场景', () => {
-    it('asyncFunc 返回 thenable 对象（非 Promise）', async () => {
+    it('asyncFunc 返回 thenable 对象（非 Promise）时应拒绝 TypeError', async () => {
       const { asyncDedupe: dedupe } = createAsyncDedupe();
       const thenable = {
         then: (onFulfilled: (v: string) => void) => {
@@ -524,8 +524,7 @@ describe('createAsyncDedupe', () => {
       };
       const asyncFunc = vi.fn().mockReturnValue(thenable);
 
-      const result = await dedupe('thenable-key', asyncFunc);
-      expect(result).toBe('thenable-result');
+      await expect(dedupe('thenable-key', asyncFunc)).rejects.toBeInstanceOf(TypeError);
     });
 
     it('并发调用时 asyncFunc 参数被正确忽略（只执行第一个）', async () => {
