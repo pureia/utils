@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- 新增核心工具 `debounce(func, wait, options?)`：时间窗防抖——`immediate: true`（默认）为 leading（首次立即执行、等待期内调用被合并），`immediate: false` 为 trailing（窗口结束执行最后一次）；返回携带 `cancel()`（丢弃 pending）与 `flush()`（立即补发最后一次被合并调用）的可调用函数；`src/core/debounce.ts` 子路径导出（含类型 `DebouncedFunction`），README 工具表与 CONTEXT.md「防抖」词条同步
+- 新增核心工具 `debounce(func, wait, options?)`：时间窗防抖——`edge: 'leading'`（首次立即执行、等待期内调用被合并），`edge: 'trailing'`（默认，窗口结束执行最后一次）；返回携带 `cancel()`（丢弃 pending）与 `flush()`（立即补发最后一次被合并调用）的可调用函数；`src/core/debounce.ts` 子路径导出（含类型 `DebouncedFunction`），README 工具表与 CONTEXT.md「防抖」词条同步
 - `createEventEmitter`：`once` 注册的处理器支持按原引用 `off` 退订（`once` 包装保存原始监听器引用供匹配，对齐 Node EventEmitter 惯例）
 - 测试：`stableStringify` 数组元素 key 与原生一致性回归 2 条（toJSON/replacer 的 key 为字符串索引、根 key 为空字符串）
 - 测试：`createEventEmitter` once 与 off 原引用交互回归 5 条（退订生效 / once 仍只触发一次 / 返回取消函数仍有效 / 双 once 移除其一 / on 语义不变）
