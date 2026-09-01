@@ -1,4 +1,4 @@
-import { CancelError, createAsyncDedupe, createCancelable, createEventEmitter, stableStringify } from '../core';
+import { CancelError, createAsyncDedupe, createCancelable, stableStringify } from '../core';
 
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
 
@@ -73,37 +73,29 @@ interface ResponseResult<R, D> {
 function isRequestConfigLike(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  // 请求拦截器返回的是完整合并配置（整体替换语义），关键字段必须齐全；
+  // 请求拦截器返回的是完整合并配置（整体替换语义），核心字段必须齐全；
   // 缺 url/host 会产出畸形 URL，缺 method/header/timeout/isDedup 会被平台按默认值
-  // 静默处理而破坏调用方语义（尤其丢 key 会使 abort(key) 失效、请求无法取消）
+  // 静默处理而破坏调用方语义。key 为可选字段，不做强校验（可信使用方契约）。
   return typeof v.url === 'string'
     && typeof v.host === 'string'
     && typeof v.method === 'string'
     && typeof v.header === 'object' && v.header !== null
     && typeof v.timeout === 'number'
-    && typeof v.isDedup === 'boolean'
-    // key 可选但须为非空字符串：空串 key 会使 abort('') 变静默 no-op——请求脱落取消体系
-    && (v.key === undefined || (typeof v.key === 'string' && v.key !== ''));
-  // data 任意；successStatusCodes 可选数组（非必填不做强校验）
+    && typeof v.isDedup === 'boolean';
+  // data 任意；successStatusCodes 可选数组（非必填不做强校验）；key 可选（可信使用方）
 }
 
 /** 类型守卫：判断值是否为合法的统一响应结果（响应拦截器返回值运行时校验） */
 function isResponseResultLike(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  // 响应拦截器返回的是完整 ResponseResult（整体替换语义）：仅校验 ok/code 会让
-  // 缺 data/header/cookies/msg/requestConfig 的返回值冒充合法结果（data 运行时
-  // undefined 与类型 `D | null` 不符），故按完整形状校验
+  // 响应拦截器返回的是完整 ResponseResult（整体替换语义）：校验核心形状
+  // ok/code/msg/data（缺任一会让调用方读到运行时 undefined 的半成品结果）
   return typeof v.ok === 'boolean'
-    // code 数字且有限：NaN/±Infinity 可通过 typeof 检查，但 includes(NaN) 恒 false、
-    // msg 会退化为 "HTTP NaN"/"HTTP Infinity"——统一按非有限数字拒绝
-    && typeof v.code === 'number' && Number.isFinite(v.code)
+    && typeof v.code === 'number'
     && typeof v.msg === 'string'
-    && typeof v.header === 'object' && v.header !== null
-    && Array.isArray(v.cookies)
-    && 'data' in v && v.data !== undefined // data 允许 null，显式 undefined 与类型 D|null 不符
-    && typeof v.requestConfig === 'object' && v.requestConfig !== null;
-  // error 可选字段，不做强校验
+    && 'data' in v;
+  // header/cookies/requestConfig 存在性与 code 有限性不做强校验（可信使用方契约）
 }
 
 /**
@@ -351,8 +343,6 @@ function createFetch<R extends BaseRequestConfig>(
 ) {
   const { asyncDedupe } = createAsyncDedupe();
   const { cancelable, cancel, isPending } = createCancelable();
-  // 取消意向：只承载「abort 已发生」的标记，不参与执行期注册，避免污染 isPending
-  const cancelIntentEmitter = createEventEmitter<Record<string, CancelError>>();
 
   /** 原始请求配置类型，由 getOriginalRequestConfig 返回值推断 */
   type OriginalRequestConfig = ReturnType<typeof getOriginalRequestConfig>;
@@ -400,7 +390,7 @@ function createFetch<R extends BaseRequestConfig>(
    * @returns 处理后的结果
    */
   // 拦截器处理函数类型为 C | Promise<C>（同步合法），故统一以 Promise.resolve 包装，
-  // 满足 cancelable 的「仅支持异步函数」契约；同步值/同步抛错行为与直接透传等价
+  // 满足 cancelable 的"异步函数"契约（同步值/同步抛错行为与直接透传等价）
   const runInterceptor = <T>(key: string | undefined, fn: () => T | Promise<T>) => key ? cancelable(key, () => Promise.resolve(fn())) : fn();
 
   /**
@@ -514,15 +504,10 @@ function createFetch<R extends BaseRequestConfig>(
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullRequestConfig));
         // 运行时校验：请求拦截器必须返回合法的完整请求配置（url/host/method/header/
-        // timeout/isDedup，key 可选），非法（如漏 return、缺字段）则告警并沿用上一配置，
-        // 避免拼出畸形 URL 或在读取 .key 处抛晦涩 TypeError；丢 key 会使 abort(key) 失效
+        // timeout/isDedup），非法（如漏 return、缺字段）则告警并沿用上一配置，
+        // 避免拼出畸形 URL 或在读取 .key 处抛晦涩 TypeError
         if (!isRequestConfigLike(interceptorResult)) {
-          console.warn('[createFetch] 请求拦截器必须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选），非法返回值已被忽略并沿用上一配置');
-        }
-        // key 为可选字段，形状校验拦不住"丢弃"：原配置带有 key 而拦截器返回值丢 key 时，
-        // 该请求会从 abort 体系脱落（abort(key) 变 no-op），视为非法并沿用上一配置
-        else if (fullRequestConfig.key !== undefined && interceptorResult.key === undefined) {
-          console.warn('[createFetch] 请求拦截器返回的配置丢失了 key，该请求将无法被 abort(key) 取消，已沿用上一配置');
+          console.warn('[createFetch] 请求拦截器必须返回完整请求配置（url/host/method/header/timeout/isDedup），非法返回值已被忽略并沿用上一配置');
         }
         else {
           fullRequestConfig = interceptorResult;
@@ -547,16 +532,15 @@ function createFetch<R extends BaseRequestConfig>(
     for (const onFulfilled of responseInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullResponseResult));
-        // 运行时校验：响应拦截器必须返回完整的统一响应结果（ok/code/msg/header/cookies/
-        // data/requestConfig），否则告警并沿用上一结果，避免类型谎言沿拦截器链扩散
+        // 运行时校验：响应拦截器必须返回完整的统一响应结果（ok/code/msg/data），
+        // 否则告警并沿用上一结果，避免类型谎言沿拦截器链扩散
         // （如需"解包"，应改写 ResponseResult.data 而非返回裸数据）。
         if (!isResponseResultLike(interceptorResult)) {
-          console.warn('[createFetch] 响应拦截器必须返回完整 ResponseResult（ok/code/msg/header/cookies/data/requestConfig），非法返回值已被忽略并沿用上一结果');
+          console.warn('[createFetch] 响应拦截器必须返回完整 ResponseResult（ok/code/msg/data），非法返回值已被忽略并沿用上一结果');
         }
         else {
-          // 边界断言：返回值已通过 isResponseResultLike 完整形状校验（ok/code/msg/header/
-          // cookies/data/requestConfig），data 类型由拦截器决定（unknown 需自行收窄），
-          // 收窄到当前请求泛型 D 为边界职责
+          // 边界断言：返回值已通过 isResponseResultLike 核心形状校验（ok/code/msg/data），
+          // data 类型由拦截器决定（unknown 需自行收窄），收窄到当前请求泛型 D 为边界职责
           fullResponseResult = interceptorResult as ResponseResult<FullRequestConfig, D>;
         }
       }
@@ -613,16 +597,10 @@ function createFetch<R extends BaseRequestConfig>(
     }
 
     // 去重请求取消 = 整组取消：共享执行透传用户 key，abort(key) 中止整组共享执行
-    // （拦截器/传输层），执行者与所有等待者统一收到 -1。
-    if (!fullRequestConfig.key) return asyncDedupe(dedupKey, () => core<D>(fullRequestConfig, requestInterceptorChain, responseInterceptorChain));
-
-    // 去重 + keyed 的起跑前取消：取消意向（cancelIntentEmitter）在共享执行启动前
-    // 同 tick 置位后，executor 直接产出归一化取消结果——请求不发出、整组统一 -1；
-    // 意向未置位则正常进入 core（详见 abort 的三层分工注记）
-    let cancelled = false;
-    const offIntent = cancelIntentEmitter.once(fullRequestConfig.key, () => { cancelled = true; });
-    const executor = () => cancelled ? Promise.resolve(normalizeError<D>(new CancelError(fullRequestConfig.key!), undefined, fullRequestConfig)) : core<D>(fullRequestConfig, requestInterceptorChain, responseInterceptorChain);
-    return asyncDedupe(dedupKey, executor).finally(offIntent);
+    // （拦截器/传输层），执行者与所有等待者统一收到 -1。共享执行经核心域取消语义
+    // 短路：起跑前（同一 tick）的 abort 对去重 keyed 请求不生效（此时实例级取消注册
+    // 尚未建立，abort 为静默 no-op），请求照常发出并返回真实结果。
+    return asyncDedupe(dedupKey, () => core<D>(fullRequestConfig, requestInterceptorChain, responseInterceptorChain));
   };
 
   /**
@@ -644,17 +622,15 @@ function createFetch<R extends BaseRequestConfig>(
      * `code: -1`；未知 key 为静默 no-op。取消只丢弃未落定的结果，不打断已进入的
      * 拦截器代码执行；并发请求间应保证 key 唯一，否则互为取消组。
      *
-     * 取消机制三层分工（实现注记）：
-     * - 外层 `createCancelable`：执行期取消（拦截器/传输层，`cancel(key)` 广播）；
-     * - `cancelIntentEmitter`：起跑前取消意向（去重共享执行尚未起跑的同一 tick 内
-     *   `abort` 短路，请求不发出；非去重路径同 tick abort 只能中止已发出的传输层）；
-     * - `asyncDedupe` 组取消：去重请求 `abort(key)` 为整组取消（执行者与等待者同收 -1）。
-     * 网络层请求已完成（`complete` 已触发、结果已在手）时，竞态窗口内到达的取消
-     * 自动作废、返回真实响应（由核心域取消/完成竞态仲裁，无需额外门闩）。
+     * 取消机制（实现注记）：执行期取消由实例级 `createCancelable` 广播（拦截器/
+     * 传输层，同 tick abort 时非去重请求在同步栈内已注册、去重请求的共享执行在
+     * 微任务内才注册——起跑前窗口的 abort 为 no-op）；去重请求的 `abort(key)` 为
+     * 整组取消（执行者与等待者同收 -1）。网络层请求已完成（complete 已触发、
+     * 结果已在手）时，竞态窗口内到达的取消自动作废、返回真实响应（由核心域
+     * 取消/完成竞态仲裁，无需额外门闩）。
      */
     abort(key: string) {
-      cancel(key); // 执行期取消（拦截器/传输层，现有路径）
-      cancelIntentEmitter.emit(key, new CancelError(key)); // 起跑前取消（新路径）
+      cancel(key); // 执行期取消（拦截器/传输层）
     },
     /**
      * 拦截器管理器：`request` 处理完整请求配置、`response` 处理统一响应结果；
