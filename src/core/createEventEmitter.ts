@@ -1,11 +1,13 @@
 type Handler<T> = (result: T) => void;
 
-/** once 包装标记：区分"once 自动包装"与普通携带 `.listener` 属性的用户函数，避免 off 扫描误匹配 */
+/** once 包装标记：既是唯一标记，也保存原始监听器引用供 off(key, 原引用) 解包装（对齐 Node EventEmitter）；普通函数即使恰好携带同名属性也不会被误删 */
 const ONCE_WRAPPER_MARKER = Symbol('@purea/utils/once-wrapper');
 
 type EventKey<T> = keyof T;
 type EventPayload<T, K extends EventKey<T>> = T[K];
 type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
+/** 存储层擦除类型：不区分事件键——每个键的处理器只能由 on/off/once/emit 的泛型边界约束 */
+type ErasedHandler = (result: any) => void;
 
 /**
  * 创建一个类型安全的事件发射器：`on` 持续订阅、`once` 一次性订阅、`emit` 广播，
@@ -27,10 +29,10 @@ type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
  * ```
  */
 function createEventEmitter<E extends Record<string, any> = Record<string, unknown>>() {
-  const store = new Map<EventKey<E>, Set<(result: E[EventKey<E>]) => void>>();
+  const store = new Map<EventKey<E>, Set<ErasedHandler>>();
 
-  /** 所有已注册的事件键 */
-  const keys = (): IterableIterator<EventKey<E>> => store.keys();
+  /** 所有已注册的事件键（快照数组：后续注册的键不回溯出现，与 emit 快照迭代哲学一致） */
+  const keys = (): EventKey<E>[] => [...store.keys()];
 
   /** 指定事件是否已注册监听器 */
   const has = <K extends EventKey<E>>(key: K) => store.has(key);
@@ -52,14 +54,13 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
   function off<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>) {
     const handlers = store.get(key);
     if (!handlers) return;
-    const raw = handler as (result: E[EventKey<E>]) => void;
+    const raw = handler as ErasedHandler;
     if (!handlers.delete(raw)) {
-      // 未命中直接引用：按 Node 惯例匹配 once 包装保存的原始引用（wrapper.listener）。
-      // 仅匹配带 ONCE_WRAPPER_MARKER 的包装——普通函数即使恰好携带同名 .listener
-      // 属性也不会被误删（防御性保守：匹配不上即为 no-op）。
+      // 未命中直接引用：按 Node 惯例匹配 once 包装保存的原始引用（ONCE_WRAPPER_MARKER 单字段）。
+      // 仅匹配带标记的包装——普通函数即使恰好携带同名属性也不会被误删（匹配不上即 no-op）。
       for (const wrapped of handlers) {
-        const w = wrapped as unknown as { listener?: (result: E[EventKey<E>]) => void } & Record<symbol, unknown>;
-        if (w[ONCE_WRAPPER_MARKER] === true && w.listener === raw) {
+        const w = wrapped as unknown as { [ONCE_WRAPPER_MARKER]: ErasedHandler };
+        if (w[ONCE_WRAPPER_MARKER] === raw) {
           handlers.delete(wrapped);
           break;
         }
@@ -76,7 +77,7 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
    */
   function on<K extends EventKey<E>>(key: K, handler: EventHandler<E, K>): () => void {
     !store.has(key) && store.set(key, new Set());
-    store.get(key)!.add(handler as (result: E[EventKey<E>]) => void);
+    store.get(key)!.add(handler as ErasedHandler);
     return () => off(key, handler);
   }
 
@@ -90,11 +91,9 @@ function createEventEmitter<E extends Record<string, any> = Record<string, unkno
     const onceHandler = ((result: EventPayload<E, K>) => {
       off(key, onceHandler as EventHandler<E, K>);
       handler(result);
-    }) as (result: E[EventKey<E>]) => void;
-    // 保存原始监听器引用与 once 标记，供 off(key, 原引用) 解包装（对齐 Node EventEmitter）
-    (onceHandler as unknown as { listener: (result: E[EventKey<E>]) => void }).listener =
-      handler as (result: E[EventKey<E>]) => void;
-    (onceHandler as unknown as Record<symbol, unknown>)[ONCE_WRAPPER_MARKER] = true;
+    }) as ErasedHandler;
+    // 原始监听器引用即标记值：单字段承载 once 标记与原引用，供 off(key, 原引用) 解包装
+    (onceHandler as unknown as { [ONCE_WRAPPER_MARKER]: ErasedHandler })[ONCE_WRAPPER_MARKER] = handler as ErasedHandler;
     return on(key, onceHandler as EventHandler<E, K>);
   }
 

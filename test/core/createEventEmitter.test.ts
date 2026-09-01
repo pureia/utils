@@ -291,6 +291,16 @@ describe('createEventEmitter', () => {
       eventEmitter.delete('user:login');
       expect([...eventEmitter.keys()]).toEqual(['cart:update']);
     });
+
+    it('keys() 应返回快照数组（随后注册的键不回溯出现）', () => {
+      const emitter = createEventEmitter<TestEvents>();
+      emitter.on('user:login', () => {});
+      const snapshot = emitter.keys();
+      emitter.on('cart:update', () => {});
+      // 快照语义：迭代期间后续注册不出现（与 emit 的迭代哲学一致）
+      expect([...snapshot]).toEqual(['user:login']);
+      expect([...emitter.keys()]).toEqual(['user:login', 'cart:update']);
+    });
   });
 
   describe('multiple instances', () => {
