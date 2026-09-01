@@ -17,7 +17,7 @@ pnpm add @purea/utils
 | `createCancelable` | `@purea/utils/core/createCancelable` | 可取消的异步执行（`cancelable`/`cancel`/`isPending`，支持 `onCancel` 清理回调） |
 | `createAsyncDedupe` | `@purea/utils/core/createAsyncDedupe` | 同键并发调用共享一次执行（`asyncDedupe`/`cancelCall`/`isPending`） |
 | `createEventEmitter` | `@purea/utils/core/createEventEmitter` | 类型安全的事件发布/订阅 |
-| `debounce` | `@purea/utils/core/debounce` | 时间窗防抖（`immediate` 可选 leading/trailing，携带 `cancel`/`flush`） |
+| `debounce` | `@purea/utils/core/debounce` | 时间窗防抖（`edge` 可选 leading/trailing，默认 trailing，携带 `cancel`/`flush`） |
 | `stableStringify` | `@purea/utils/core/stableStringify` | 确定性 JSON 序列化（键排序，供去重键哈希等场景） |
 
 ```ts
@@ -131,7 +131,7 @@ export interface ResponseResult<R, D> {
 }
 ```
 
-- 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。校验要求**完整形状**：请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选；原配置含 key 而返回值丢 key 或返回空串 key 视为非法，保证 `abort(key)` 不失效），响应拦截器须返回完整 `ResponseResult`（缺 `data`/`header`/`cookies` 等字段视为非法，`code` 须为有限数字）；非法返回值告警并沿用上一值。
+- 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。校验要求**核心形状**：请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选），响应拦截器须返回统一响应结果（ok/code/msg/data）；非法返回值告警并沿用上一值。
 
 ### 失败类别速查表
 

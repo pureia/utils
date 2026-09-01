@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `debounce`：`options.immediate?: boolean` 更名为 `options.edge?: 'leading' | 'trailing'`，默认由 leading 改为 **trailing**（对齐主流防抖惯例；破坏性签名调整，0.x 未使用阶段）。leading 语义（首次立即执行、等待期合并、`flush` 补发最后一次）与 `wait` 非负校验不变
+- `createCancelable`/`createAsyncDedupe`：`asyncFunc` 契约放宽——返回值经 `Promise.resolve` 归一，原生 Promise、thenable、同步值均可（此前仅支持原生 Promise，同步返回值/thenable/跨 realm Promise 以 `TypeError` 拒绝；破坏性行为调整，0.x 未使用阶段），同步抛错仍以原始错误拒绝
+- `createFetch`：拦截器返回值运行时校验收敛为**核心形状**——请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选），响应拦截器须返回统一响应结果（ok/code/msg/data）；移除丢 key/空串 key/有限 code/缺 data 显式 undefined 等深度特判与专属告警文案（统一为一条告警并沿用上一值）
+- `createFetch`：移除 `cancelIntentEmitter` 起跑前取消短路——`request()` 与 `abort()` 处于同一 tick 时，去重 keyed 请求的 `abort` 不再生效（该窗口无取消注册，请求照常发出并返回真实结果）；非去重 keyed 请求原语义不变（取消注册在同步栈内已建立，中止传输层或拦截器阶段）
+- 测试：持平裁减约 43 例重复/空洞/接线琐事用例（278 → 236），保留全部行为契约钉住与高价值回归保护（fire-and-forget 失败防护、取消/落定竞态仲裁、平台异常数据挂起防护、负码不撞哨兵等），覆盖率维持 100%
+- CONTEXT.md 词表同步：「取消」「同 tick 取消的路径差异」「取消执行」「异步去重」「防抖」「拦截器返回值校验」「拦截器与失败结果的边界」按新语义改写；README debounce 工具表与拦截器校验描述同步
+- `debounce`：新增 `edge` 选项（替代 `immediate`，见上）；仅 `edge: 'leading'` 时窗口过期后 `flush` 仍补发最后一次被合并调用（trailing 语义下窗口结束即执行、无滞留 pending）
 - `createCancelable`：`cancelable` 的 `asyncFunc` 签名收窄为 `() => Promise<T>`——仅支持返回原生 Promise 的异步函数；同步返回值、thenable、跨 realm/polyfill Promise（如 Bluebird）均为契约违规，调用以 `TypeError` 拒绝（破坏性签名调整，0.x 未使用阶段）
 - `createAsyncDedupe`：`asyncDedupe` 的 `asyncFunc` 签名同步收窄为 `() => Promise<V>`（与「取消执行」契约一致；破坏性签名调整，0.x 未使用阶段）
 - 公共 API 注释统一重写：补 `CmpFunc`/`ReplacerFunc` 文档、`buildFullConfig` 新增 `@example`，注释改以行为契约级描述并移除全部 ADR 编号引用
@@ -31,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `createFetch`：get/post/put/delete 四个快捷方法改为 `shortcut` 工厂生成（消除四份重复与 4 处 `as` 断言；公共签名不变）
 - `createAsyncDedupe`：`started.then` 双分支提炼为 `cleanup`（语义等价；仍不可用 `.finally`——派生 promise 会以原 reason 拒绝产生 unhandledrejection）
 - CONTEXT.md 词表同步：「配置合并」补显式 undefined 语义、「拦截器返回值校验」补空串 key/有限 code、「code」补非数字状态码归一、「拦截器/业务错误」补平台回调异常数据、「去重」补拦截器链快照时机、「防抖」补非负 wait、「事件发射器」补 keys 快照
+
+### Removed
+
+- `createFetch`：去重请求起跑前（同一 tick）的 `abort(key)` 短路承诺（0.1.0 引入）——`request()` 与 `abort()` 同 tick 的场景现实不可达，经 2026-09 过度处理审查裁定移除，CONTEXT「同 tick 取消的路径差异」词条同步改写
+- `createEventEmitter` 的 `onError` 注入参数（**补记**：该移除发生在 0.2.0 之后，此前未记入 CHANGELOG）
+- 测试：移除 `createEventEmitter` onError 注入的过时用例（API 已移除，2 个用例此前持续失败）
 
 ### Fixed
 
@@ -50,11 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CHANGELOG 补 `[unreleased]`/`[0.2.0]` 版本链接定义
 - AGENTS.md：Domain docs 修正（`docs/adr/` 已归档并入 CONTEXT.md）、新增「提交规范」一节；`docs/agents/domain.md` 同步
 - 测试：补行为契约用例（取消广播、主动取消跳过响应链、`getErrorMessage` 对象 message 分支、once 抛错自移除、default 导出、BigInt 行为）并统一测试收尾纪律（fake timers、queueMicrotask、try/finally 恢复 spy）
-
-### Removed
-
-- `createEventEmitter` 的 `onError` 注入参数（**补记**：该移除发生在 0.2.0 之后，此前未记入 CHANGELOG）
-- 测试：移除 `createEventEmitter` onError 注入的过时用例（API 已移除，2 个用例此前持续失败）
 
 ## [0.2.0] - 2026-08-29
 
