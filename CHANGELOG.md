@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 测试：`stableStringify` 数组元素 key 与原生一致性回归 2 条（toJSON/replacer 的 key 为字符串索引、根 key 为空字符串）
 - 测试：`createEventEmitter` once 与 off 原引用交互回归 5 条（退订生效 / once 仍只触发一次 / 返回取消函数仍有效 / 双 once 移除其一 / on 语义不变）
 - 测试：`createFetch` 的 `getErrorMessage` 未覆盖路径补 2 条（拦截器抛字符串、抛仅含 `msg` 字段的对象），uniapp 行覆盖达 99.2%
+- 测试：`createCancelable` Proxy 包装 Promise（异常 then）、同 key 多并发 + cancel + 工作晚 reject（settle 卫语句）；`createEventEmitter` keys 快照语义；`debounce` 负 wait；`createFetch` complete 兜底（数字 errMsg / null result / 字符串 statusCode / keyed abort 对照）、buildFullConfig undefined 覆盖与实测（201 实判 / uni.request 收 GET）、去重快照时机、空串 key 校验（abort 实测）、响应结果 NaN/±Infinity code 校验
 
 ### Changed
 
@@ -24,12 +25,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README 轻量修正：`FetchCode` 与 `ResponseResult` 中 `-4` 措辞统一、`buildFullConfig`/`FetchCode` 示例改为子路径导入（与 uni-app 环境警告自洽）、核心工具表补 `onCancel`
 - `createCancelable`：移除启动前取消的 never-promise 悬挂——已取消分支直接短路返回（resolve-after-reject 为 no-op），行为等价、实现与注释简化
 - 测试命名清理：`originalRequestConfig` → `rawRequestConfig`（对齐断言字段）；移除测试名中残留的两处 ADR 编号（aDR 0003/0004 → 描述性名称）
+- `createEventEmitter`：store 内部类型改为擦除类型（`ErasedHandler`）收敛 `as` 断言（9 行 → 7 行，剩余为边界收窄/解包装声明；公共泛型签名不变）；once 包装 `.listener` + `ONCE_WRAPPER_MARKER` 双字段合并为单 symbol 字段（原始引用即标记值）
+- `createEventEmitter`：`keys()` 返回快照数组而非活迭代器（与 emit 快照迭代哲学一致；破坏性返回类型变更，0.x 未使用阶段）
+- `createCancelable`：settleResolve/settleReject 提炼 `finish()` 并增加 `state === 'settled'` 卫语句（取消胜出路径免去 emitter 未命中 O(N) 扫描）；`onCancel` 抛错 surface 文档修正（unhandledrejection 而非 uncaught exception，与实现一致）
+- `createFetch`：get/post/put/delete 四个快捷方法改为 `shortcut` 工厂生成（消除四份重复与 4 处 `as` 断言；公共签名不变）
+- `createAsyncDedupe`：`started.then` 双分支提炼为 `cleanup`（语义等价；仍不可用 `.finally`——派生 promise 会以原 reason 拒绝产生 unhandledrejection）
+- CONTEXT.md 词表同步：「配置合并」补显式 undefined 语义、「拦截器返回值校验」补空串 key/有限 code、「code」补非数字状态码归一、「拦截器/业务错误」补平台回调异常数据、「去重」补拦截器链快照时机、「防抖」补非负 wait、「事件发射器」补 keys 快照
 
 ### Fixed
 
 - `stableStringify`：数组元素传给 toJSON/replacer 的 key 由数字索引改为字符串索引，与原生 `JSON.stringify` 行为对齐（此前与"签名与原生 replacer 一致"的注释声明不符）；`ReplacerFunc` 的 `key` 类型由 `string | number` 收窄为 `string`
 - `createCancelable`：修复"取消与落定竞态窗口"——取消裁决经微任务延后、与结算门闩仲裁（内部实现，无外部 API）：工作函数结果已产出（如底层回调已触发）但结算微任务尚未执行时，`cancel(key)` 不再覆盖已完成的结果；作废的取消不触发 `onCancel`（不再对已完成工作重复 abort）。`cancelable` 可选参数合并为 options 对象——`cancelable(key, fn, onCancel?, options?)` 改为 `cancelable(key, fn, options?: { onCancel? })`（破坏性签名调整，0.x 未使用阶段）
 - `createFetch`：拦截器返回值运行时校验强化——请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选；原配置含 key 而返回值丢 key 视为非法，保证 `abort(key)` 不失效），响应拦截器须返回完整 `ResponseResult`（ok/code/msg/header/cookies/data/requestConfig），非法返回值告警并沿用上一值
+- `createFetch`：`dispatchRequest` 的 complete 回调增加异常兜底——平台回调收到异常数据（errMsg 非字符串、result 为 null）时归一化为 `code: -4` 而非让 `responsePromise` 永不落定（此前后台回调异常数据下无 key 请求永久挂起、无 abort 脱身路径）；字符串 statusCode（平台异常数据）走哨兵路径而非透传（违约 `code: number` 声明且 `includes` 误判失败）
+- `createFetch`：`buildFullConfig` 显式 `undefined` 字段视为"未提供"、不再覆盖默认值（此前可选解构再传参会静默替换默认，如 `successStatusCodes: undefined` 令 201 被判失败）
+- `createFetch`：拦截器链快照时机统一——以 `request()` 同步栈为准拍取，去重与非去重路径一致（此前去重 executor 微任务内才快照，同 tick 注册的拦截器会污染进行中的去重请求）
+- `createFetch`：请求拦截器返回空串 `key` 视为非法（沿用上一配置，保证 `abort('')` 不脱落取消体系）；响应结果 `code` 为有限数字校验（NaN/±Infinity 拒绝，避免 "HTTP NaN/Infinity" msg）
+- `debounce`：`wait` 为负值时抛 RangeError（此前仅校验有限数字，负值交给引擎平台差异化钳制，与"避免平台差异化钳制"设计原则冲突）
 
 ### Docs
 

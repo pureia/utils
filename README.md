@@ -36,7 +36,7 @@ await promise.catch((error) => {
 
 ### 其他公共导出
 
-- `buildFullConfig(defaults, requestConfig)`：与 createFetch 内部同源的配置合并函数（公共 API）。合并规则：`header` 按字段深合并（叠加），其余字段请求配置提供即整体替换（数组按引用替换），`rawRequestConfig` 保留请求配置原始引用。
+- `buildFullConfig(defaults, requestConfig)`：与 createFetch 内部同源的配置合并函数（公共 API）。合并规则：`header` 按字段深合并（叠加），其余字段请求配置提供即整体替换（数组按引用替换），**显式 `undefined` 视为"未提供"**（不覆盖默认值），`rawRequestConfig` 保留请求配置原始引用。
 
 ```ts
 import { buildFullConfig } from '@purea/utils/uniapp/createFetch';
@@ -46,7 +46,7 @@ const config = buildFullConfig(defaults, { url: '/users', header: { 'X-Extra': '
 void config; // header 深合并 => { 'X-Extra': '1' }；rawRequestConfig => 请求配置原引用
 ```
 
-- `FetchCode`：请求域哨兵码常量集（`-1` 中止 / `-2` 超时 / `-3` 未知 / `-4` 拦截器/业务错误,亦承载请求未发出的框架错误）。
+- `FetchCode`：请求域哨兵码常量集（`-1` 中止 / `-2` 超时 / `-3` 未知 / `-4` 拦截器/业务错误,亦承载请求未发出的框架错误与平台回调异常数据）。
 
 ```ts
 import { FetchCode } from '@purea/utils/uniapp/createFetch';
@@ -121,7 +121,7 @@ await Promise.all([
 ```ts
 export interface ResponseResult<R, D> {
   ok: boolean; // code 在 successStatusCodes 内为 true
-  code: number; // HTTP 状态码或哨兵码（-1 中止 / -2 超时 / -3 未知 / -4 拦截器/业务错误,亦承载请求未发出的框架错误）
+  code: number; // HTTP 状态码或哨兵码（-1 中止 / -2 超时 / -3 未知 / -4 拦截器/业务错误,亦承载请求未发出的框架错误与平台回调异常数据）
   msg: string; // 状态码描述
   header: Record<string, string>;
   cookies: string[];
@@ -131,7 +131,7 @@ export interface ResponseResult<R, D> {
 }
 ```
 
-- 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。校验要求**完整形状**：请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选；原配置含 key 而返回值丢 key 视为非法，保证 `abort(key)` 不失效），响应拦截器须返回完整 `ResponseResult`（缺 `data`/`header`/`cookies` 等字段视为非法）；非法返回值告警并沿用上一值。
+- 请求/响应拦截器：`fetch.interceptors.request.use(config => ...)` / `fetch.interceptors.response.use(result => ...)`，返回值经运行时形状校验，抛错被归一化收口。校验要求**完整形状**：请求拦截器须返回完整请求配置（url/host/method/header/timeout/isDedup，key 可选；原配置含 key 而返回值丢 key 或返回空串 key 视为非法，保证 `abort(key)` 不失效），响应拦截器须返回完整 `ResponseResult`（缺 `data`/`header`/`cookies` 等字段视为非法，`code` 须为有限数字）；非法返回值告警并沿用上一值。
 
 ### 失败类别速查表
 
@@ -142,7 +142,7 @@ export interface ResponseResult<R, D> {
 | `FetchCode.ABORT` (-1) | 主动取消或传输层中止 | 用户主动取消：否；传输层中止：是 | 主动取消时为 `CancelError` 实例；中止时 undefined（`instanceof CancelError` 可区分） |
 | `FetchCode.TIMEOUT` (-2) | 超时 | 是 | undefined |
 | `FetchCode.UNKNOWN` (-3) | 未知/无有效 HTTP 状态 | 是 | undefined |
-| `FetchCode.INTERCEPTOR` (-4) | 拦截器/业务错误、请求未发出的框架错误 | 否 | 原始异常（业务对象或 Error） |
+| `FetchCode.INTERCEPTOR` (-4) | 拦截器/业务错误、请求未发出的框架错误、平台回调异常数据 | 否 | 原始异常（业务对象或 Error） |
 
 ## 开发
 
