@@ -82,7 +82,8 @@ function isRequestConfigLike(value: unknown): boolean {
     && typeof v.header === 'object' && v.header !== null
     && typeof v.timeout === 'number'
     && typeof v.isDedup === 'boolean'
-    && (v.key === undefined || typeof v.key === 'string');
+    // key 可选但须为非空字符串：空串 key 会使 abort('') 变静默 no-op——请求脱落取消体系
+    && (v.key === undefined || (typeof v.key === 'string' && v.key !== ''));
   // data 任意；successStatusCodes 可选数组（非必填不做强校验）
 }
 
@@ -94,7 +95,9 @@ function isResponseResultLike(value: unknown): boolean {
   // 缺 data/header/cookies/msg/requestConfig 的返回值冒充合法结果（data 运行时
   // undefined 与类型 `D | null` 不符），故按完整形状校验
   return typeof v.ok === 'boolean'
-    && typeof v.code === 'number'
+    // code 数字且有限：NaN/±Infinity 可通过 typeof 检查，但 includes(NaN) 恒 false、
+    // msg 会退化为 "HTTP NaN"/"HTTP Infinity"——统一按非有限数字拒绝
+    && typeof v.code === 'number' && Number.isFinite(v.code)
     && typeof v.msg === 'string'
     && typeof v.header === 'object' && v.header !== null
     && Array.isArray(v.cookies)
@@ -147,15 +150,22 @@ export function buildFullConfig<
   R extends BaseRequestConfig,
   RC extends RequestConfigLike<R>
 >(defaults: R, requestConfig: RC): MergedRequestConfig<R, RC> {
+  // 显式 undefined 视为"未提供"：可选展开（如 `{ successStatusCodes } = maybeOptional` 后再传参）
+  // 是常见来源，undefined 覆盖默认值会静默改变语义（如 successStatusCodes 回落全局默 [200]）。
+  // header 深合并为独立路径，其 spread 天然忽略 undefined，不受过滤影响。
+  const defined = Object.fromEntries(
+    Object.entries(requestConfig).filter(([, value]) => value !== undefined)
+  ) as Record<string, unknown>;
   // 合并对象在运行时字段齐全（defaults 补齐 RC 缺省的必填字段），
   // 但类型层面 spread 会把重叠字段推断为"可缺省"（如 method: FetchMethod | undefined），
   // 无法静态满足目标类型，故保留此运行时为真的断言。
   return {
     ...defaults,
-    ...requestConfig,
+    ...defined,
     rawRequestConfig: requestConfig,
     header: { ...defaults.header, ...requestConfig.header },
-  } as MergedRequestConfig<R, RC>;
+    // Object.fromEntries 擦除了整对象键的精确类型，此处经 unknown 中转断言
+  } as unknown as MergedRequestConfig<R, RC>;
 }
 
 /**
@@ -207,8 +217,10 @@ function simpleHash(str: string): string {
  * @returns 统一后的状态码：-1=中止，-2=超时，-3=未知错误，100-599 的 HTTP 状态码原样返回
  */
 function getStatusCode(code?: number | null, defaultMsg?: string) {
-  // 仅 100-599 视为有效 HTTP 状态；1-99 的异常正数同样归一，不透传
-  if (code && code >= MIN_HTTP_STATUS && code <= MAX_HTTP_STATUS) return code;
+  // 仅 number 且 100-599 视为有效 HTTP 状态；字符串状态码（平台异常数据，
+  // 如 '200'）不归一为数字——透传会违约 code: number 声明且 includes 误判失败，
+  // 按无 HTTP 状态进入哨兵路径（1-99 的异常正数同样归一，不透传）
+  if (typeof code === 'number' && code >= MIN_HTTP_STATUS && code <= MAX_HTTP_STATUS) return code;
   if (defaultMsg?.startsWith('request:fail abort')) return FetchCode.ABORT;
   if (defaultMsg?.startsWith('request:fail timeout')) return FetchCode.TIMEOUT;
   return FetchCode.UNKNOWN;
@@ -443,27 +455,34 @@ function createFetch<R extends BaseRequestConfig>(
         // data 类型为 unknown（见 RequestConfig），传平台时按 uni.request 签名收窄
         data: data as UniApp.RequestOptions['data'],
         complete(result) {
-          const {
-            data: respData,
-            header: respHeader,
-            cookies,
-            errMsg: msg,
-            statusCode: code,
-          } = result as UniApp.GeneralCallbackResult & UniApp.RequestSuccessCallbackResult;
+          try {
+            const {
+              data: respData,
+              header: respHeader,
+              cookies,
+              errMsg: msg,
+              statusCode: code,
+            } = result as UniApp.GeneralCallbackResult & UniApp.RequestSuccessCallbackResult;
 
-          const statusCode = getStatusCode(code, msg);
-          const ok = (fullRequestConfig.successStatusCodes ?? DEFAULT_SUCCESS_CODES).includes(statusCode);
-          const responseMsg = getStatusCodeMsg(statusCode, msg);
+            const statusCode = getStatusCode(code, msg);
+            const ok = (fullRequestConfig.successStatusCodes ?? DEFAULT_SUCCESS_CODES).includes(statusCode);
+            const responseMsg = getStatusCodeMsg(statusCode, msg);
 
-          const baseResponse = {
-            code: statusCode,
-            msg: responseMsg,
-            header: respHeader ?? {},
-            cookies: cookies ?? [],
-            requestConfig: fullRequestConfig,
-          };
-          // 成功/失败仅 ok 与 data 的取值不同，其余字段共用；统一类型下 data 恒为 D | null
-          resolve({ ...baseResponse, ok, data: (respData ?? null) as D | null });
+            const baseResponse = {
+              code: statusCode,
+              msg: responseMsg,
+              header: respHeader ?? {},
+              cookies: cookies ?? [],
+              requestConfig: fullRequestConfig,
+            };
+            // 成功/失败仅 ok 与 data 的取值不同，其余字段共用；统一类型下 data 恒为 D | null
+            resolve({ ...baseResponse, ok, data: (respData ?? null) as D | null });
+          }
+          catch (error) {
+            // 平台回调异常数据（errMsg 非字符串、result 为 null 等）：归一化为 -4 而非让
+            // responsePromise 永不落定——无 key 请求此前无 abort 脱身路径，会永久挂起
+            resolve(normalizeError<D>(error, undefined, fullRequestConfig));
+          }
         },
       });
     });
@@ -479,16 +498,18 @@ function createFetch<R extends BaseRequestConfig>(
    *
    * @typeParam D - 响应数据类型
    * @param config - 完整请求配置
+   * @param requestInterceptorChain - 请求拦截器链快照（request() 同步栈拍取，见其注记）
+   * @param responseInterceptorChain - 响应拦截器链快照（同上）
    * @returns 经过拦截器处理后的响应结果
    */
-  const core = async <D>(config: FullRequestConfig) => {
+  const core = async <D>(
+    config: FullRequestConfig,
+    requestInterceptorChain: ReturnType<typeof requestManager.snapshot>,
+    responseInterceptorChain: ReturnType<typeof responseManager.snapshot>
+  ) => {
     let fullRequestConfig = config;
     // key 唯一性告警：另一进行中的请求已占用该 key，abort(key) 将同时取消它们
     fullRequestConfig.key && isPending(fullRequestConfig.key) && console.warn(`[createFetch] key "${fullRequestConfig.key}" 已被其他进行中的请求占用，abort(key) 会同时取消所有同 key 请求，请保证并发请求间 key 唯一`);
-    // 拦截器链快照：进入 core 时对请求/响应链一次快照，
-    // 进行中的请求只执行发起时刻已注册的拦截器，执行期间新注册的只影响后续请求
-    const requestInterceptorChain = requestManager.snapshot();
-    const responseInterceptorChain = responseManager.snapshot();
     for (const onFulfilled of requestInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullRequestConfig));
@@ -573,7 +594,14 @@ function createFetch<R extends BaseRequestConfig>(
       return Promise.resolve(normalizeError<D>(error, undefined, { rawRequestConfig: requestConfig } as FullRequestConfig));
     }
 
-    if (!fullRequestConfig.isDedup) return core<D>(fullRequestConfig);
+    // 拦截器链快照：以 request() 同步栈为准一次拍取，去重/非去重两条路径共用同一时机——
+    // 进行中的请求（含去重 executor 微任务启动的窗口）只执行发起时刻已注册的拦截器，
+    // 执行期间新注册的只影响后续请求（若在 core 内拍取，去重路径会晚一拍，同 tick 注册的
+    // 拦截器将污染进行中的去重请求，与非去重路径不一致）
+    const requestInterceptorChain = requestManager.snapshot();
+    const responseInterceptorChain = responseManager.snapshot();
+
+    if (!fullRequestConfig.isDedup) return core<D>(fullRequestConfig, requestInterceptorChain, responseInterceptorChain);
 
     let dedupKey: string;
     try {
@@ -586,14 +614,14 @@ function createFetch<R extends BaseRequestConfig>(
 
     // 去重请求取消 = 整组取消：共享执行透传用户 key，abort(key) 中止整组共享执行
     // （拦截器/传输层），执行者与所有等待者统一收到 -1。
-    if (!fullRequestConfig.key) return asyncDedupe(dedupKey, () => core<D>(fullRequestConfig));
+    if (!fullRequestConfig.key) return asyncDedupe(dedupKey, () => core<D>(fullRequestConfig, requestInterceptorChain, responseInterceptorChain));
 
     // 去重 + keyed 的起跑前取消：取消意向（cancelIntentEmitter）在共享执行启动前
     // 同 tick 置位后，executor 直接产出归一化取消结果——请求不发出、整组统一 -1；
     // 意向未置位则正常进入 core（详见 abort 的三层分工注记）
     let cancelled = false;
     const offIntent = cancelIntentEmitter.once(fullRequestConfig.key, () => { cancelled = true; });
-    const executor = () => cancelled ? Promise.resolve(normalizeError<D>(new CancelError(fullRequestConfig.key!), undefined, fullRequestConfig)) : core<D>(fullRequestConfig);
+    const executor = () => cancelled ? Promise.resolve(normalizeError<D>(new CancelError(fullRequestConfig.key!), undefined, fullRequestConfig)) : core<D>(fullRequestConfig, requestInterceptorChain, responseInterceptorChain);
     return asyncDedupe(dedupKey, executor).finally(offIntent);
   };
 

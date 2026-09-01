@@ -623,6 +623,69 @@ describe('createFetch', () => {
       expect(result.header).toEqual({});
       expect(result.cookies).toEqual([]);
     });
+
+    it('complete 回调收到非字符串 errMsg（平台异常数据）时应归一化为 -4 而非永久挂起', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        setTimeout(() => complete({ data: null, statusCode: undefined, errMsg: 42 as any }), 5);
+      });
+
+      const fetch = makeFetch();
+      const result = await Promise.race([
+        fetch.request({ url: '/test', method: 'GET' }),
+        new Promise<never>(() => {}), // 若挂起则 race 永不落定，测试超时失败
+      ]);
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      // error 字段应为原始异常（TypeError：errMsg 非字符串时 getStatusCode 内 startsWith 调用失败）
+      expect(result.error).toBeInstanceOf(TypeError);
+    });
+
+    it('complete 回调收到 null result（平台异常数据）时应归一化为 -4 而非永久挂起', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        setTimeout(complete as any, 5, null);
+      });
+
+      const fetch = makeFetch();
+      const result = await Promise.race([
+        fetch.request({ url: '/test', method: 'GET' }),
+        new Promise<never>(() => {}),
+      ]);
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.INTERCEPTOR);
+      expect(result.error).toBeInstanceOf(TypeError); // 解构 null 抛 TypeError
+    });
+
+    it('keyed 请求 + 平台异常数据：abort 仍是脱身路径（对照：-1 而非 -4）', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        setTimeout(() => complete(null as any), 10);
+      });
+
+      const fetch = makeFetch();
+      // complete 晚于 abort 触发：取消仲裁先落位（-1），complete 兜底的 -4 派不上场
+      const pending = fetch.request({ url: '/test', method: 'GET', key: 'abort-escape' });
+      fetch.abort('abort-escape');
+      const result = await pending;
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe(FetchCode.ABORT);
+      expect(result.error).toBeInstanceOf(CancelError);
+    });
+
+    it('complete 回调收到字符串 statusCode（平台异常数据）时应走哨兵路径而非透传字符串', async () => {
+      mockUniRequest.mockImplementation(({ complete }) => {
+        complete({ data: null, statusCode: '404' as any, errMsg: 'request:fail', cookies: [], header: {} });
+      });
+
+      const fetch = makeFetch();
+      const result = await fetch.request({ url: '/test', method: 'GET' });
+
+      // 字符串 '404' 不得透传为 code（违约 number 声明、includes 误判失败）——按无 HTTP 状态归 -3
+      expect(typeof result.code).toBe('number');
+      expect(result.code).toBe(FetchCode.UNKNOWN);
+      expect(result.ok).toBe(false);
+    });
   });
 
   describe('请求取消 (abort)', () => {
@@ -1077,6 +1140,38 @@ describe('createFetch', () => {
       expect(config.timeout).toBe(5000);
       expect(config.rawRequestConfig).toEqual({ url: '/users', method: 'POST', timeout: 5000 });
     });
+
+    it('请求配置显式 undefined 字段应视为未提供（不覆盖默认值）', () => {
+      const withCodes = { ...defaults, successStatusCodes: [200, 201] as number[] };
+      const config = buildFullConfig(withCodes, { url: '/users', successStatusCodes: undefined as unknown as number[] });
+
+      expect(config.successStatusCodes).toEqual([200, 201]); // 保留默认，而非回落到全局 [200]
+    });
+
+    it('请求配置显式 method: undefined 应保留默认 method', () => {
+      const config = buildFullConfig(defaults, { url: '/users', method: undefined as unknown as 'GET' });
+
+      expect(config.method).toBe('GET');
+    });
+
+    it('成功码实测：默认 [200, 201] + 请求配置 successStatusCodes: undefined → 201 应判成功', async () => {
+      mockSuccessResponse({ id: 1 }, 201);
+
+      const fetch = makeFetch({ successStatusCodes: [200, 201] });
+      const result = await fetch.request({ url: '/users', successStatusCodes: undefined as unknown as number[] });
+
+      expect(result.ok).toBe(true);
+      expect(result.code).toBe(201);
+    });
+
+    it('method 实测：显式 undefined 时 uni.request 应收到默认 GET', async () => {
+      mockSuccessResponse({});
+
+      const fetch = makeFetch();
+      await fetch.request({ url: '/users', method: undefined as unknown as 'GET' });
+
+      expect(mockUniRequest).toHaveBeenCalledWith(expect.objectContaining({ method: 'GET' }));
+    });
   });
 
   describe('拦截器返回值运行时校验', () => {
@@ -1153,6 +1248,89 @@ describe('createFetch', () => {
         expect(result.ok).toBe(true);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('完整请求配置'));
         expect(mockUniRequest).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://api.example.com/users' }));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('去重请求同 tick 注册的拦截器不应污染进行中的请求（快照时机与非去重一致）', async () => {
+      let completeFn: any;
+      mockUniRequest.mockImplementation(({ complete }) => { completeFn = complete; });
+      const fetch = _createFetch(() => ({
+        host: 'https://api.example.com',
+        method: 'GET' as const,
+        header: {},
+        timeout: 10000,
+        isDedup: true,
+      }));
+
+      const pending = fetch.request({ url: '/users', key: 'snap-key' });
+      // 同一 tick 注册：此前去重路径在 executor 微任务内快照，该拦截器会污染进行中的请求
+      fetch.interceptors.request.use((config: any) => ({ ...config, header: { ...config.header, REQ: 'LATE' } }));
+
+      await vi.waitFor(() => expect(mockUniRequest).toHaveBeenCalledTimes(1));
+      expect(mockUniRequest.mock.calls[0]![0].header).not.toHaveProperty('REQ'); // 快照已拍，不含新拦截器
+      completeFn({ data: 'ok', statusCode: 200, errMsg: 'request:ok', cookies: [], header: {} });
+      const result = await pending;
+      expect(result.code).toBe(200);
+    });
+
+    it('请求拦截器返回空串 key 应视为非法（沿用上一配置，abort 保持可用）', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockUniRequest.mockReturnValue({ abort: vi.fn() }); // 请求挂起（不触发 complete）
+        const fetch = makeFetch();
+        fetch.interceptors.request.use((config: any) => ({ ...config, key: '' }));
+
+        const pending = fetch.request({ url: '/users', method: 'GET', key: 'real-key' });
+        await vi.waitFor(() => expect(mockUniRequest).toHaveBeenCalledTimes(1));
+
+        // 空串 key 被拦截后原配置 key('real-key') 仍接管取消体系——abort 实测生效
+        fetch.abort('real-key');
+
+        const result = await pending;
+        expect(result.ok).toBe(false);
+        expect(result.code).toBe(FetchCode.ABORT);
+        expect(result.requestConfig.key).toBe('real-key');
+        expect(warnSpy).toHaveBeenCalled();
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器返回 code 为 NaN 时应告警并沿用上一结果', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.response.use((result: any) => ({ ...result, code: Number.NaN }));
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(result.code).toBe(200); // 沿用上一结果，而非 "HTTP NaN"
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('完整 ResponseResult'));
+      }
+      finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('响应拦截器返回 code 为 ±Infinity 时应告警并沿用上一结果', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockSuccessResponse({ id: 1 });
+        const fetch = makeFetch();
+        fetch.interceptors.response.use((result: any) => ({ ...result, code: Infinity }));
+        fetch.interceptors.response.use((result: any) => ({ ...result, code: -Infinity }));
+
+        const result = await fetch.request({ url: '/users', method: 'GET' });
+
+        expect(result.ok).toBe(true);
+        expect(result.code).toBe(200); // 沿用上一结果，而非 "HTTP Infinity"
+        expect(warnSpy).toHaveBeenCalledTimes(2);
       }
       finally {
         warnSpy.mockRestore();
