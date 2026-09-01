@@ -625,6 +625,19 @@ function createFetch<R extends BaseRequestConfig>(
     return asyncDedupe(dedupKey, executor).finally(offIntent);
   };
 
+  /**
+   * 快捷方法工厂：生成固定 method 的短版请求函数（get/post/put/delete
+   * 仅 method 字面量不同，其余逻辑一致——以此消除四份重复）。
+   *
+   * @typeParam M - 请求方法
+   * @param method - 固定请求方法
+   * @returns 快捷请求函数：`(requestConfig) => Promise<ResponseResult>`，method 自动设置
+   */
+  const shortcut = <M extends FetchMethod>(method: M) =>
+    <D = unknown>(requestConfig: ShortcutRequestConfig) =>
+      // 泛型 R 下 Omit<Partial<R>, 'method'> 无法静态满足 Partial<R>（TS2345），需断言
+      request<D>({ ...requestConfig, method } as RequestConfig);
+
   return {
     /**
      * 按 key 取消请求：key 下所有进行中的注册（拦截器阶段与传输层）统一归一化为
@@ -652,43 +665,14 @@ function createFetch<R extends BaseRequestConfig>(
     interceptors,
     /** 发送请求，method 由请求配置决定；配置合并与去重取消规则见 request 定义处 */
     request,
-    /**
-     * 发送 GET 请求（method 自动设为 'GET'）
-     * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method）
-     * @returns 响应结果 Promise
-     */
-    get<D = unknown>(requestConfig: ShortcutRequestConfig) {
-      // 泛型 R 下 Omit<Partial<R>, 'method'> 无法静态满足 Partial<R>（TS2345），需断言
-      return request<D>({ ...requestConfig, method: 'GET' } as RequestConfig);
-    },
-    /**
-     * 发送 POST 请求（method 自动设为 'POST'）
-     * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method）
-     * @returns 响应结果 Promise
-     */
-    post<D = unknown>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'POST' } as RequestConfig);
-    },
-    /**
-     * 发送 PUT 请求（method 自动设为 'PUT'）
-     * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method）
-     * @returns 响应结果 Promise
-     */
-    put<D = unknown>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'PUT' } as RequestConfig);
-    },
-    /**
-     * 发送 DELETE 请求（method 自动设为 'DELETE'）
-     * @typeParam D - 响应数据类型
-     * @param requestConfig - 快捷请求配置（无需提供 method）
-     * @returns 响应结果 Promise
-     */
-    delete<D = unknown>(requestConfig: ShortcutRequestConfig) {
-      return request<D>({ ...requestConfig, method: 'DELETE' } as RequestConfig);
-    },
+    /** 发送 GET 请求（method 自动设为 'GET'）；签名见 `shortcut` 工厂 */
+    get: shortcut('GET'),
+    /** 发送 POST 请求（method 自动设为 'POST'）；签名见 `shortcut` 工厂 */
+    post: shortcut('POST'),
+    /** 发送 PUT 请求（method 自动设为 'PUT'）；签名见 `shortcut` 工厂 */
+    put: shortcut('PUT'),
+    /** 发送 DELETE 请求（method 自动设为 'DELETE'）；签名见 `shortcut` 工厂 */
+    delete: shortcut('DELETE'),
   };
 }
 
