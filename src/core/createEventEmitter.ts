@@ -3,11 +3,8 @@ type Handler<T> = (result: T) => void;
 /** once 包装标记：区分"once 自动包装"与普通携带 `.listener` 属性的用户函数，避免 off 扫描误匹配 */
 const ONCE_WRAPPER_MARKER = Symbol('@purea/utils/once-wrapper');
 
-/** 事件键类型 */
 type EventKey<T> = keyof T;
-/** 事件载荷类型 */
 type EventPayload<T, K extends EventKey<T>> = T[K];
-/** 事件处理程序类型 */
 type EventHandler<T, K extends EventKey<T>> = Handler<EventPayload<T, K>>;
 
 /**

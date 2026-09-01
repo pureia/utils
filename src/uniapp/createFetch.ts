@@ -1,6 +1,5 @@
 import { CancelError, createAsyncDedupe, createCancelable, createEventEmitter, stableStringify } from '../core';
 
-/** 请求方法类型 */
 type FetchMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'CONNECT' | 'HEAD' | 'OPTIONS' | 'TRACE';
 
 /**
@@ -490,7 +489,6 @@ function createFetch<R extends BaseRequestConfig>(
     // 进行中的请求只执行发起时刻已注册的拦截器，执行期间新注册的只影响后续请求
     const requestInterceptorChain = requestManager.snapshot();
     const responseInterceptorChain = responseManager.snapshot();
-    // 请求拦截处理
     for (const onFulfilled of requestInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullRequestConfig));
@@ -515,7 +513,6 @@ function createFetch<R extends BaseRequestConfig>(
       }
     }
 
-    // 发送请求
     let fullResponseResult: ResponseResult<FullRequestConfig, D>;
     try {
       fullResponseResult = await dispatchRequest<D>(fullRequestConfig);
@@ -526,7 +523,6 @@ function createFetch<R extends BaseRequestConfig>(
       return normalizeError<D>(error, undefined, fullRequestConfig);
     }
 
-    // 响应拦截处理
     for (const onFulfilled of responseInterceptorChain) {
       try {
         const interceptorResult = await runInterceptor(fullRequestConfig.key, () => onFulfilled(fullResponseResult));
@@ -592,6 +588,9 @@ function createFetch<R extends BaseRequestConfig>(
     // （拦截器/传输层），执行者与所有等待者统一收到 -1。
     if (!fullRequestConfig.key) return asyncDedupe(dedupKey, () => core<D>(fullRequestConfig));
 
+    // 去重 + keyed 的起跑前取消：取消意向（cancelIntentEmitter）在共享执行启动前
+    // 同 tick 置位后，executor 直接产出归一化取消结果——请求不发出、整组统一 -1；
+    // 意向未置位则正常进入 core（详见 abort 的三层分工注记）
     let cancelled = false;
     const offIntent = cancelIntentEmitter.once(fullRequestConfig.key, () => { cancelled = true; });
     const executor = () => cancelled ? Promise.resolve(normalizeError<D>(new CancelError(fullRequestConfig.key!), undefined, fullRequestConfig)) : core<D>(fullRequestConfig);

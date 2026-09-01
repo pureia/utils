@@ -97,6 +97,9 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
   const replacer = isObj && typeof opts.replacer === 'function' ? opts.replacer : defaultReplacer;
 
   const cmpOpt = typeof opts === 'function' ? opts : (isObj ? opts.cmp : void 0);
+  // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）；
+  // 仅当调用方 cmp 声明了第三个参数（按 key 取值函数）时才注入 getter，
+  // 与原始 json-stable-stringify 的调用约定保持一致
   const cmp = cmpOpt
     ? (node: Record<string, any>) => {
         const get = cmpOpt.length > 2 ? (k: string) => node[k] : void 0;

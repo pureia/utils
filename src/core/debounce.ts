@@ -50,10 +50,14 @@ export function debounce<T extends (...args: any[]) => unknown>(
   let pending: { this: ThisParameterType<T>; args: Parameters<T> } | null = null;
 
   const debounced = function (this: ThisParameterType<T>, ...args: Parameters<T>) {
+    // 重置窗口：任何调用都从当前时刻重新起算 wait（清除上一次的计时器）
     if (timeout !== null) clearTimeout(timeout);
 
     if (immediate) {
       // leading：首次立即执行，等待期内后续调用被合并丢弃（留待 flush 补发）
+      // leading 判定：timeout 为 null 表示窗口已关闭（或从未开启），本次调用为窗口外首次
+      // 注意：leading 下 timeout 仅作为"窗口已开启"的标记（回调只负责关闭窗口，
+      // 不执行任何调用）——与 trailing 下"窗口结束执行最后一次"的定时器是两种用法
       const callNow = timeout === null;
       timeout = setTimeout(() => { timeout = null; }, wait);
       if (callNow) {

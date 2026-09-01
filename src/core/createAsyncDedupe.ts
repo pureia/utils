@@ -40,7 +40,8 @@ function createAsyncDedupe() {
     // 首个调用者：注册共享执行
     const started = cancelable(key, asyncFunc);
     inflight.set(key, started);
-    // 落定即清理；该处理器同时挂接了拒绝分支——没有任何调用者 await/catch 时，
+    // 落定即清理（成功/失败/取消都会走到这里）；挂接拒绝分支同时标记了 rejection
+    // 已处理——没有任何调用者 await/catch 时不会触发 unhandledrejection
     started.then(
       () => { inflight.delete(key); },
       () => { inflight.delete(key); }

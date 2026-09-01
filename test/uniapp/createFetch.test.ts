@@ -300,7 +300,7 @@ describe('createFetch', () => {
 
       const fetch = makeFetch();
       fetch.interceptors.response.use((response) => {
-        // data 类型为 unknown（见 ADR 0012/0016），拦截器读取需自行收窄
+        // data 类型为 unknown（见 CONTEXT「统一响应结果」词条），拦截器读取需自行收窄
         response.data = { ...(response.data ?? {}) as Record<string, unknown>, processed: true };
         return response;
       });
@@ -642,7 +642,7 @@ describe('createFetch', () => {
       expect(result.msg).toBe('Request Abort');
       expect(mockRequestTask.abort).toHaveBeenCalled();
       // 非去重 keyed 请求：uni.request 已在同步栈内发出，同 tick abort 只能中止传输层；
-      // 与去重路径（ADR 0018『起跑前 abort 不发起』）语义不同
+      // 与去重路径（CONTEXT「同 tick 取消的路径差异」：起跑前 abort 短路、请求不发出）语义不同
       expect(mockUniRequest).toHaveBeenCalled();
     });
 
@@ -952,7 +952,9 @@ describe('createFetch', () => {
         const fetch = makeFetch({ isDedup: true });
         const p1 = fetch.request({ url: '/users', method: 'GET', key: 'pre-start' });
         const p2 = fetch.request({ url: '/users', method: 'GET', key: 'pre-start' });
-        // 不冲刷任何微任务：共享执行尚未起跑、取消监听尚未注册（ADR 0018 取消意向覆盖此窗口）
+        // 不冲刷任何微任务：共享执行尚未起跑、其内部取消订阅尚未注册——本测试
+        // 仅依赖同步已注册的取消意向监听（意向覆盖起跑前窗口，
+        // 见 CONTEXT「同 tick 取消的路径差异」词条）
         fetch.abort('pre-start');
 
         const [r1, r2] = await Promise.all([p1, p2]);
