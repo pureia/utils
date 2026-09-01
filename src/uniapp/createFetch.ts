@@ -338,9 +338,7 @@ function createInterceptorManager<C>() {
  * fetch.abort('user-list');
  * ```
  */
-function createFetch<R extends BaseRequestConfig>(
-  getOriginalRequestConfig: () => R
-) {
+function createFetch<R extends BaseRequestConfig>(getOriginalRequestConfig: () => R) {
   const { asyncDedupe } = createAsyncDedupe();
   const { cancelable, cancel, isPending } = createCancelable();
 
@@ -613,10 +611,7 @@ function createFetch<R extends BaseRequestConfig>(
    * @param method - 固定请求方法
    * @returns 快捷请求函数：`(requestConfig) => Promise<ResponseResult>`，method 自动设置
    */
-  const shortcut = <M extends FetchMethod>(method: M) =>
-    <D = unknown>(requestConfig: ShortcutRequestConfig) =>
-      // 泛型 R 下 Omit<Partial<R>, 'method'> 无法静态满足 Partial<R>（TS2345），需断言
-      request<D>({ ...requestConfig, method } as RequestConfig);
+  const shortcut = <M extends FetchMethod>(method: M) => <D = unknown>(requestConfig: ShortcutRequestConfig) => request<D>({ ...requestConfig, method } as RequestConfig);
 
   return {
     /**
