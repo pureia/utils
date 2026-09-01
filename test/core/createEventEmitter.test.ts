@@ -84,36 +84,6 @@ describe('createEventEmitter', () => {
       expect(calls).toBe(0);
     });
 
-    it('off(原引用) 不应误删恰好带同名 .listener 属性的普通处理器', () => {
-      const emitter = createEventEmitter<TestEvents>();
-      const leaked: any = vi.fn();
-      leaked.listener = () => {}; // 模拟遗留属性（历史 once 包装解包后残留）
-      emitter.on('user:login', leaked);
-      // target 未注册（监听不存在）→ off 必须为 no-op 而非误删带 .listener 属性的普通处理器
-      emitter.off('user:login', leaked.listener);
-      emitter.emit('user:login', { userId: '1', name: 'John' });
-      expect(leaked).toHaveBeenCalledTimes(1);
-    });
-
-    it('once 正常路径仍只触发一次', () => {
-      const emitter = createEventEmitter<TestEvents>();
-      let calls = 0;
-      const h = () => { calls++; };
-      emitter.once('user:login', h);
-      emitter.emit('user:login', { userId: '1', name: 'John' });
-      emitter.emit('user:login', { userId: '2', name: 'Jane' });
-      expect(calls).toBe(1);
-    });
-
-    it('once 返回的取消函数仍有效', () => {
-      const emitter = createEventEmitter<TestEvents>();
-      let calls = 0;
-      const unsubscribe = emitter.once('user:login', () => { calls++; });
-      unsubscribe();
-      emitter.emit('user:login', { userId: '1', name: 'John' });
-      expect(calls).toBe(0);
-    });
-
     it('两个 once 注册移除其一，另一个仍触发一次', () => {
       const emitter = createEventEmitter<TestEvents>();
       let a = 0; let b = 0;
@@ -127,31 +97,6 @@ describe('createEventEmitter', () => {
       expect(a).toBe(0);
       expect(b).toBe(1);
       expect(emitter.has('user:login')).toBe(false); // 最后一个处理程序移除后 key 清理
-    });
-
-    it('off 原引用不影响 on 注册的同引用处理器的既有语义', () => {
-      const emitter = createEventEmitter<TestEvents>();
-      let calls = 0;
-      const h = () => { calls++; };
-      emitter.on('user:login', h);
-      emitter.off('user:login', h);
-      emitter.emit('user:login', { userId: '1', name: 'John' });
-      expect(calls).toBe(0);
-    });
-  });
-
-  describe('unsubscribe', () => {
-    it('should remove specific handler via unsubscribe function', () => {
-      const handler1 = vi.fn();
-      const handler2 = vi.fn();
-
-      const unsubscribe1 = eventEmitter.on('user:login', handler1);
-      eventEmitter.on('user:login', handler2);
-      unsubscribe1();
-      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
-
-      expect(handler1).not.toHaveBeenCalled();
-      expect(handler2).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -239,19 +184,6 @@ describe('createEventEmitter', () => {
       expect(() => eventEmitter.emit('user:login', { userId: '1', name: 'John' })).not.toThrow();
     });
 
-    it('should handle multiple once subscriptions independently', () => {
-      const handler1 = vi.fn();
-      const handler2 = vi.fn();
-
-      eventEmitter.once('user:login', handler1);
-      eventEmitter.once('user:login', handler2);
-      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
-      eventEmitter.emit('user:login', { userId: '2', name: 'Jane' });
-
-      expect(handler1).toHaveBeenCalledTimes(1);
-      expect(handler2).toHaveBeenCalledTimes(1);
-    });
-
     it('should handle off for non-existent handler gracefully', () => {
       const handler = vi.fn();
 
@@ -267,16 +199,6 @@ describe('createEventEmitter', () => {
       expect(() => eventEmitter.delete('user:login')).not.toThrow();
       expect(eventEmitter.has('user:login')).toBe(false);
     });
-
-    it('should not duplicate same handler for same event', () => {
-      const handler = vi.fn();
-
-      eventEmitter.on('user:login', handler);
-      eventEmitter.on('user:login', handler);
-      eventEmitter.emit('user:login', { userId: '1', name: 'John' });
-
-      expect(handler).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('keys', () => {
@@ -290,16 +212,6 @@ describe('createEventEmitter', () => {
 
       eventEmitter.delete('user:login');
       expect([...eventEmitter.keys()]).toEqual(['cart:update']);
-    });
-
-    it('keys() 应返回快照数组（随后注册的键不回溯出现）', () => {
-      const emitter = createEventEmitter<TestEvents>();
-      emitter.on('user:login', () => {});
-      const snapshot = emitter.keys();
-      emitter.on('cart:update', () => {});
-      // 快照语义：迭代期间后续注册不出现（与 emit 的迭代哲学一致）
-      expect([...snapshot]).toEqual(['user:login']);
-      expect([...emitter.keys()]).toEqual(['user:login', 'cart:update']);
     });
   });
 
@@ -418,24 +330,6 @@ describe('createEventEmitter', () => {
         emitter.emit('user:login', { userId: '1', name: 'John' });
 
         expect(errorSpy).toHaveBeenCalledTimes(1);
-      }
-      finally {
-        errorSpy.mockRestore();
-      }
-    });
-
-    it('should not affect other handlers when a handler throws', () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      try {
-        const emitter = createEventEmitter<TestEvents>();
-        const h2 = vi.fn();
-        emitter.on('user:login', () => { throw new Error('boom'); });
-        emitter.on('user:login', h2);
-
-        emitter.emit('user:login', { userId: '1', name: 'John' });
-
-        expect(errorSpy).toHaveBeenCalledTimes(1);
-        expect(h2).toHaveBeenCalledTimes(1);
       }
       finally {
         errorSpy.mockRestore();

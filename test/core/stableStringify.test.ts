@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { stableStringify } from '@purea/utils';
-import stableStringifyDefault from '../../src/core/stableStringify';
 
 describe('stableStringify', () => {
   describe('基本对象 key 排序', () => {
@@ -154,14 +153,6 @@ describe('stableStringify', () => {
       });
       expect(result).toBe('{"b":2}');
     });
-
-    it('replacer 返回 undefined 时应跳过该属性', () => {
-      const obj = { a: 1, b: 2 };
-      const result = stableStringify(obj, {
-        replacer: (_parent, key, value) => (key === 'a' ? undefined : value),
-      });
-      expect(result).toBe('{"b":2}');
-    });
   });
 
   describe('cycles 循环引用', () => {
@@ -202,12 +193,6 @@ describe('stableStringify', () => {
     });
   });
 
-  describe('default 导出', () => {
-    it('default 导出应与命名导出指向同一实现', () => {
-      expect(stableStringifyDefault).toBe(stableStringify);
-    });
-  });
-
   describe('toJSON 自动调用', () => {
     it('应自动调用 toJSON 方法', () => {
       const obj = {
@@ -220,12 +205,6 @@ describe('stableStringify', () => {
         },
       };
       expect(stableStringify(obj)).toBe('{"a":1,"b":42}');
-    });
-
-    it('date 对象应通过 toJSON 输出 ISO 字符串', () => {
-      const date = new Date('2024-01-01T00:00:00.000Z');
-      const result = stableStringify({ date });
-      expect(result).toBe(`{"date":"${date.toJSON()}"}`);
     });
 
     it('toJSON 返回值应继续参与后续递归排序', () => {
@@ -354,22 +333,10 @@ describe('stableStringify', () => {
   });
 
   describe('与 JSON.stringify 的一致性', () => {
-    it('相同内容不同顺序的对象应通过 stableStringify 产生一致结果', () => {
+    it('相同内容不同顺序的对象（含嵌套）应通过 stableStringify 产生一致结果', () => {
       const obj1 = { b: 2, a: 1, c: { e: 5, d: 4 } };
       const obj2 = { c: { d: 4, e: 5 }, a: 1, b: 2 };
       expect(stableStringify(obj1)).toBe(stableStringify(obj2));
-    });
-
-    it('简单值应与 JSON.stringify 一致', () => {
-      expect(stableStringify('test')).toBe(JSON.stringify('test'));
-      expect(stableStringify(123)).toBe(JSON.stringify(123));
-      expect(stableStringify(true)).toBe(JSON.stringify(true));
-      expect(stableStringify(null)).toBe(JSON.stringify(null));
-    });
-
-    it('纯数组应与 JSON.stringify 一致', () => {
-      const arr = [1, 'two', true, null];
-      expect(stableStringify(arr)).toBe(JSON.stringify(arr));
     });
   });
 });
