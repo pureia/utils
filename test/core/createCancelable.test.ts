@@ -51,6 +51,18 @@ describe('createCancelable', () => {
       await expect(cancelable('bad-call', () => badCall)).rejects.toBeInstanceOf(TypeError);
       await expect(cancelable('bad-call', () => badCall)).rejects.toThrow('must return a Promise');
     });
+
+    it('异常 then（Proxy 包装的原生 Promise）应按落定失败拒绝原异常', async () => {
+      const { cancelable } = createCancelable();
+      const evil = new Proxy(Promise.resolve(1), {
+        get(target, prop, receiver) {
+          if (prop === 'then') throw new Error('broken then getter');
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+      // instanceof Promise 通过（前缀），异常 then 在 result.then 处抛出 → settleReject 原异常
+      await expect(cancelable('proxy-key', () => evil as any)).rejects.toThrow('broken then getter');
+    });
   });
 
   describe('cancel 取消执行', () => {
@@ -231,6 +243,25 @@ describe('createCancelable', () => {
       // once 监听触发即自清理
       expect(isPending('key')).toBe(false);
       await expect(promise).rejects.toBeInstanceOf(CancelError);
+    });
+
+    it('同 key 多并发 + cancel + 工作晚 reject：settle 卫语句生效（取消已胜出，拒绝被短路）', async () => {
+      const { cancelable: c, cancel } = createCancelable();
+      const rejecters: Array<(e: unknown) => void> = [];
+      const work = () => new Promise<string>((_resolve, reject) => { rejecters.push(reject); });
+      const p1 = c('multi-key', work);
+      const p2 = c('multi-key', work); // 同 key 并发注册：cancel 广播到两个执行
+      // 冲刷微任务：让两个启动微任务 M1 运行（工作函数启动、result.then 已注册）
+      await Promise.resolve();
+      cancel('multi-key');
+      // 两个调用均应收到 CancelError
+      await expect(p1).rejects.toBeInstanceOf(CancelError);
+      await expect(p2).rejects.toBeInstanceOf(CancelError);
+      // 工作晚 reject：取消裁决微任务先落位（state='settled'），随后 settleReject 被卫语句短路
+      rejecters.forEach((reject) => reject(new Error('late failure')));
+      // 冲刷微任务链：确认无未处理拒绝/无异常
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
     it('未注册的 key 应为 false', () => {

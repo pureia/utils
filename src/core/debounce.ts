@@ -19,12 +19,12 @@ export interface DebouncedFunction<T extends (...args: any[]) => unknown> {
  * - `cancel()` 丢弃 pending（含被合并的调用）并重置窗口，后续调用开启新窗口；
  *   `flush()` 立即执行 pending（无 pending 时 no-op，但会中止当前窗口）。
  * - 防抖函数为 fire-and-forget 设计：返回值恒为 void（即便被包装函数有返回值，
- *   仅 leading 的首次调用可拿到，语义不确定故不暴露）；`wait` 必须为有限数字，
+ *   仅 leading 的首次调用可拿到，语义不确定故不暴露）；`wait` 必须为有限非负数字，
  *   非法值抛 `RangeError`（避免交给引擎做平台差异化的钳制）。
  *
  * @typeParam T - 被包装函数类型（返回值被忽略，恒为 void）
  * @param func - 要防抖的函数
- * @param wait - 等待窗口时长（毫秒，必须为有限数字）
+ * @param wait - 等待窗口时长（毫秒，必须为有限非负数字）
  * @param options - 可选配置
  * @param options.immediate - 为 true 时首次调用立即执行（默认），为 false 时等待期结束后执行最后一次
  * @returns 防抖后的函数（携带 `cancel`/`flush`）
@@ -42,8 +42,10 @@ export function debounce<T extends (...args: any[]) => unknown>(
   wait: number,
   options?: { immediate?: boolean }
 ): DebouncedFunction<T> {
-  if (!Number.isFinite(wait)) {
-    throw new RangeError(`debounce: wait 必须是有限数字，收到 ${wait}`);
+  // 必须为有限非负数字：负数交给引擎会按平台差异化钳制（window 钳 0ms/Node 钳 1ms），
+  // 与"避免平台差异化钳制"的设计原则冲突（wait=0 是合法窗口，保留）
+  if (!Number.isFinite(wait) || wait < 0) {
+    throw new RangeError(`debounce: wait 必须是有限非负数字，收到 ${wait}`);
   }
   const { immediate = true } = options ?? {};
   let timeout: ReturnType<typeof setTimeout> | null = null;

@@ -57,6 +57,13 @@ describe('debounce', () => {
     expect(() => debounce(() => {}, -Infinity)).toThrow(RangeError);
   });
 
+  it('wait 为负数时应抛 RangeError（平台差异化钳制与设计原则冲突）', () => {
+    expect(() => debounce(() => {}, -1)).toThrow(RangeError);
+    expect(() => debounce(() => {}, -0.5)).toThrow(RangeError);
+    // wait=0 是合法窗口，保留
+    expect(() => debounce(() => {}, 0)).not.toThrow();
+  });
+
   it('leading 窗口过期后新调用覆盖并丢弃旧 pending（不补发）', async () => {
     vi.useFakeTimers();
     const calls: number[] = [];

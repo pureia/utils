@@ -74,7 +74,8 @@ function createCancelable() {
    * @param options.onCancel - 取消时执行的清理回调（如底层 API 的 abort）；
    *   任何一次**生效的**取消都会触发（完成竞态中作废的取消不触发）。
    *   回调在取消裁决的同一微任务内执行，晚于 `cancel()` 调用一帧且晚于 reject——
-   *   回调抛错不影响取消结果（异常自微任务内逃逸为全局未捕获，不做结构防护，
+   *   回调抛错不影响取消结果；异常所逃逸的 surface 为微任务派生的 promise 拒绝
+   *   （unhandledrejection，非同步 uncaught exception）——不做结构防护，
    *   需要时由调用方自行兜底）。
    * @returns 异步函数的执行结果（取消时 promise 以 `CancelError` 拒绝）
    */
@@ -96,15 +97,21 @@ function createCancelable() {
       });
     });
 
-    // 落定的统一出口：成功、失败、契约违规、取消仲裁均经此处转移状态并清理注册
-    const settleResolve = (value: T) => {
+    // 落定的统一出口：成功、失败、契约违规、取消仲裁均经此处转移状态并清理注册。
+    // 取消胜出路径（once 已在 emit 内自清理）再次 off() 会落入 emitter 未命中扫描（O(N)），
+    // 卫语句直接返回即可；E1 作废路径（settle 先跑、state 仍为 'running'）不受影响。
+    const finish = () => {
       execution.state = 'settled';
       off();
+    };
+    const settleResolve = (value: T) => {
+      if (execution.state === 'settled') return;
+      finish();
       resolve(value);
     };
     const settleReject = (error: unknown) => {
-      execution.state = 'settled';
-      off();
+      if (execution.state === 'settled') return;
+      finish();
       reject(error);
     };
 

@@ -41,11 +41,12 @@ function createAsyncDedupe() {
     const started = cancelable(key, asyncFunc);
     inflight.set(key, started);
     // 落定即清理（成功/失败/取消都会走到这里）；挂接拒绝分支同时标记了 rejection
-    // 已处理——没有任何调用者 await/catch 时不会触发 unhandledrejection
-    started.then(
-      () => { inflight.delete(key); },
-      () => { inflight.delete(key); }
-    );
+    // 已处理——没有任何调用者 await/catch 时不会触发 unhandledrejection。
+    // 注意不能用 `.finally`：其派生 promise 会以原 reason 拒绝且无处理者 →
+    // unhandledrejection（测试 L353-378 反证）；then(cleanup, cleanup) 两侧都返回
+    // undefined，派生 promise 以 undefined 完成，不产生未处理拒绝。
+    const cleanup = () => { inflight.delete(key); };
+    started.then(cleanup, cleanup);
     return started;
   }
 
