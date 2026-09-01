@@ -30,10 +30,11 @@ function createAsyncDedupe() {
    *
    * @typeParam V - 异步函数返回值类型
    * @param key - 唯一标识符，相同 key 的调用会被合并
-   * @param asyncFunc - 要执行的异步函数，须返回原生 Promise（契约同「取消执行」）
+   * @param asyncFunc - 要执行的异步函数；返回值为 Promise、thenable 或同步值均可
+   *   （契约同「取消执行」）
    * @returns 异步函数的结果（取消时以 `CancelError` 拒绝）
    */
-  function asyncDedupe<V>(key: PropertyKey, asyncFunc: () => Promise<V>): Promise<V> {
+  function asyncDedupe<V>(key: PropertyKey, asyncFunc: () => V | PromiseLike<V>): Promise<V> {
     const shared = inflight.get(key);
     if (shared) return shared as Promise<V>;
 

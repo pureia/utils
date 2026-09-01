@@ -67,9 +67,8 @@ function createCancelable() {
    *
    * @typeParam T - 异步函数返回类型
    * @param key - 取消标识符，与 `cancel(key)` 配对使用
-   * @param asyncFunc - 要执行的异步函数，须返回原生 Promise；thenable、跨 realm
-   *   或 polyfill Promise（如 Bluebird）为契约违规，调用以 `TypeError` 拒绝；
-   *   同步抛错仍以原始错误拒绝
+   * @param asyncFunc - 要执行的异步函数；返回值为 Promise、thenable 或同步值均可
+   *   （经 `Promise.resolve` 归一），同步抛错仍以原始错误拒绝
    * @param options - 可选配置
    * @param options.onCancel - 取消时执行的清理回调（如底层 API 的 abort）；
    *   任何一次**生效的**取消都会触发（完成竞态中作废的取消不触发）。
@@ -81,7 +80,7 @@ function createCancelable() {
    */
   const cancelable = <T>(
     key: PropertyKey,
-    asyncFunc: () => Promise<T>,
+    asyncFunc: () => T | PromiseLike<T>,
     options?: { onCancel?: () => void }
   ) => new Promise<T>((resolve, reject) => {
     const execution: Execution = { state: 'scheduled', cancelSignaled: false };
@@ -97,7 +96,7 @@ function createCancelable() {
       });
     });
 
-    // 落定的统一出口：成功、失败、契约违规、取消仲裁均经此处转移状态并清理注册。
+    // 落定的统一出口：成功、失败、取消仲裁均经此处转移状态并清理注册。
     // 取消胜出路径（once 已在 emit 内自清理）再次 off() 会落入 emitter 未命中扫描（O(N)），
     // 卫语句直接返回即可；E1 作废路径（settle 先跑、state 仍为 'running'）不受影响。
     const finish = () => {
@@ -119,16 +118,10 @@ function createCancelable() {
     Promise.resolve().then(() => {
       if (execution.cancelSignaled) return;
       execution.state = 'running';
-      let result: Promise<T>;
-      try { result = asyncFunc(); }
-      // 同步抛错：视为立即落定，拒绝原始错误
+      // 同步抛错视为立即落定（拒绝原始错误）；返回值经 Promise.resolve 归一——
+      // 原生 Promise/thenable/同步值均可（then getter 抛错由 Promise 解析协议收口为拒绝）
+      try { return Promise.resolve(asyncFunc()).then(settleResolve, settleReject); }
       catch (error) { return settleReject(error); }
-      // 契约校验：仅支持原生 Promise——thenable、跨 realm/polyfill Promise
-      // （如 Bluebird 实例）均为契约违规，以 TypeError 拒绝
-      if (!(result instanceof Promise)) return settleReject(new TypeError(`${String(key)} async call must return a Promise`));
-      try { result.then(settleResolve, settleReject); }
-      // 异常 then（如 Proxy 包装的 Promise）按落定失败拒绝
-      catch (error) { settleReject(error); }
     });
   });
 

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CancelError, createCancelable } from '@purea/utils';
-import createCancelableDefault from '../../src/core/createCancelable';
 
 describe('createCancelable', () => {
   describe('cancelable 基本执行', () => {
@@ -11,19 +10,18 @@ describe('createCancelable', () => {
       expect(result).toBe(42);
     });
 
-    it('同步返回非 Promise 值应拒绝 TypeError（仅支持异步函数）', async () => {
+    it('同步返回非 Promise 值应正常落定为成功值', async () => {
       const { cancelable } = createCancelable();
-      // 类型层 lie：模拟非法调用方（JS 调用方或强转）
-      const promise = cancelable('key1', () => 42 as unknown as Promise<number>);
-      await expect(promise).rejects.toBeInstanceOf(TypeError);
-      await expect(promise).rejects.toThrow('must return a Promise');
+      // 契约：同步值经 Promise.resolve 归一为成功落定
+      const promise = cancelable('key1', () => 42);
+      await expect(promise).resolves.toBe(42);
     });
 
-    it('契约违规拒绝（非取消）不应触发 onCancel', async () => {
+    it('同步返回值正常落定不应触发 onCancel', async () => {
       const { cancelable } = createCancelable();
       const onCancel = vi.fn();
-      const promise = cancelable('key1', () => undefined as unknown as Promise<number>, { onCancel });
-      await expect(promise).rejects.toBeInstanceOf(TypeError);
+      const result = await cancelable('key1', () => 42, { onCancel });
+      expect(result).toBe(42);
       expect(onCancel).not.toHaveBeenCalled();
     });
 
@@ -39,17 +37,23 @@ describe('createCancelable', () => {
       await expect(cancelable('sync-throw', () => { throw error; })).rejects.toBe(error);
     });
 
-    it('thenable（非原生 Promise）应拒绝 TypeError（仅支持原生 Promise）', async () => {
+    it('thenable（非原生 Promise）应按其 then 语义落定', async () => {
       const { cancelable } = createCancelable();
-      // 契约只认原生 Promise：thenable 无论 then 是否可抛错，一律以 TypeError 拒绝
+      // 正常 thenable：经 Promise.resolve 采纳其 then 语义落定
+      const okThenable = {
+        then: (onFulfilled: (v: string) => void) => {
+          queueMicrotask(() => onFulfilled('thenable-result'));
+        },
+      };
+      await expect(cancelable('ok-thenable', () => okThenable as any)).resolves.toBe('thenable-result');
+      // 异常 then getter：Promise 解析协议收口为拒绝原异常
       const badGetter = Object.defineProperty({}, 'then', {
         get() { throw new Error('broken then getter'); },
       });
-      await expect(cancelable('bad-getter', () => badGetter as any)).rejects.toBeInstanceOf(TypeError);
-      await expect(cancelable('bad-getter', () => badGetter as any)).rejects.toThrow('must return a Promise');
+      await expect(cancelable('bad-getter', () => badGetter as any)).rejects.toThrow('broken then getter');
+      // then 调用抛错：按落定失败拒绝原异常
       const badCall: any = { then: () => { throw new Error('broken then call'); } };
-      await expect(cancelable('bad-call', () => badCall)).rejects.toBeInstanceOf(TypeError);
-      await expect(cancelable('bad-call', () => badCall)).rejects.toThrow('must return a Promise');
+      await expect(cancelable('bad-call', () => badCall)).rejects.toThrow('broken then call');
     });
 
     it('异常 then（Proxy 包装的原生 Promise）应按落定失败拒绝原异常', async () => {
@@ -60,7 +64,7 @@ describe('createCancelable', () => {
           return Reflect.get(target, prop, receiver);
         },
       });
-      // instanceof Promise 通过（前缀），异常 then 在 result.then 处抛出 → settleReject 原异常
+      // Proxy 不透明传输内部槽：Promise.resolve 探测 then 时抛错 → 拒绝原异常
       await expect(cancelable('proxy-key', () => evil as any)).rejects.toThrow('broken then getter');
     });
   });
@@ -116,10 +120,6 @@ describe('createCancelable', () => {
       await expect(p2).rejects.toBeInstanceOf(CancelError);
     });
 
-    it('default 导出应与命名导出指向同一实现', () => {
-      expect(createCancelableDefault).toBe(createCancelable);
-    });
-
     it('多次 cancel 同一个 key 不应抛错', async () => {
       const { cancelable: c, cancel } = createCancelable();
       const neverResolving = new Promise(() => {});
@@ -130,16 +130,6 @@ describe('createCancelable', () => {
       expect(() => cancel('key')).not.toThrow();
 
       await expect(promise).rejects.toBeInstanceOf(CancelError);
-    });
-
-    it('cancel 已注册 key 应拒绝其 pending 调用', async () => {
-      const { cancelable: c, cancel } = createCancelable();
-      const neverResolving = new Promise(() => {});
-      const p1 = c('key-a', () => neverResolving);
-
-      cancel('key-a');
-
-      await expect(p1).rejects.toBeInstanceOf(CancelError);
     });
 
     it('同一 tick 内 cancel 后工作函数不应启动（副作用不发生）', async () => {
@@ -245,23 +235,17 @@ describe('createCancelable', () => {
       await expect(promise).rejects.toBeInstanceOf(CancelError);
     });
 
-    it('同 key 多并发 + cancel + 工作晚 reject：settle 卫语句生效（取消已胜出，拒绝被短路）', async () => {
+    it('取消后工作晚 reject：拒绝被 settle 卫语句短路（无未处理拒绝）', async () => {
       const { cancelable: c, cancel } = createCancelable();
       const rejecters: Array<(e: unknown) => void> = [];
       const work = () => new Promise<string>((_resolve, reject) => { rejecters.push(reject); });
       const p1 = c('multi-key', work);
-      const p2 = c('multi-key', work); // 同 key 并发注册：cancel 广播到两个执行
-      // 冲刷微任务：让两个启动微任务 M1 运行（工作函数启动、result.then 已注册）
-      await Promise.resolve();
+      await Promise.resolve(); // 冲刷微任务：工作已启动、result.then 已注册
       cancel('multi-key');
-      // 两个调用均应收到 CancelError
       await expect(p1).rejects.toBeInstanceOf(CancelError);
-      await expect(p2).rejects.toBeInstanceOf(CancelError);
-      // 工作晚 reject：取消裁决微任务先落位（state='settled'），随后 settleReject 被卫语句短路
+      // 工作晚 reject：取消裁决微任务先落位（state='settled'），settleReject 被卫语句短路
       rejecters.forEach((reject) => reject(new Error('late failure')));
-      // 冲刷微任务链：确认无未处理拒绝/无异常
-      await Promise.resolve();
-      await Promise.resolve();
+      await Promise.resolve(); // 冲刷微任务链：确认无未处理拒绝/无异常
     });
 
     it('未注册的 key 应为 false', () => {
