@@ -90,6 +90,28 @@ describe('createFetch', () => {
       );
     });
 
+    it('host 带尾斜杠 + url 带首斜杠时应去除重复斜杠', async () => {
+      mockSuccessResponse({});
+
+      const fetch = makeFetch();
+      await fetch.request({ url: '/users/1', method: 'GET', host: 'https://api.example.com/' });
+
+      expect(mockUniRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://api.example.com/users/1' })
+      );
+    });
+
+    it('url 缺首斜杠时应补全分隔符', async () => {
+      mockSuccessResponse({});
+
+      const fetch = makeFetch();
+      await fetch.request({ url: 'users/1', method: 'GET' });
+
+      expect(mockUniRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://api.example.com/users/1' })
+      );
+    });
+
     it('应该传递请求参数到 uni.request', async () => {
       mockSuccessResponse({ id: 2 }, 201);
 

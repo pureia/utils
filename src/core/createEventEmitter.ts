@@ -29,6 +29,9 @@ type ErasedHandler = (result: any) => void;
  * ```
  */
 function createEventEmitter<E extends Record<string, any> = Record<string, unknown>>() {
+  // 处理器以 Set 存储：同一 key 注册【相同函数引用】多次会被按引用去重、emit 只触发一次。
+  // 此为刻意设计（顺带防御重复误订阅；once 每次都新建包装所以各自独立），
+  // 与 Node EventEmitter「允许重复监听器、每次注册均触发」的语义不同。
   const store = new Map<EventKey<E>, Set<ErasedHandler>>();
 
   /** 所有已注册的事件键（快照数组：后续注册的键不回溯出现，与 emit 快照迭代哲学一致） */

@@ -438,7 +438,9 @@ function createFetch<R extends BaseRequestConfig>(
     // abort 自动作废，返回真实响应——见 createCancelable 的时序契约。）
     const responsePromise = new Promise<ResponseResult<FullRequestConfig, D>>((resolve) => {
       requestTask = uni.request({
-        url: `${host}${url}`,
+        // host 去尾斜杠、url 去首斜杠后用单斜杠连接：避免相邻斜杠产出 `//`，
+        // 或 url 缺首斜杠产出缺失分隔符的畸形 URL。
+        url: `${host.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`,
         method,
         header,
         timeout,
