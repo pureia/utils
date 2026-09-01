@@ -11,10 +11,20 @@ describe('createCancelable', () => {
       expect(result).toBe(42);
     });
 
-    it('应该正常执行同步函数并返回结果', async () => {
+    it('同步返回非可等待值应拒绝 TypeError（仅支持异步函数）', async () => {
       const { cancelable } = createCancelable();
-      const result = await cancelable('key1', () => 42);
-      expect(result).toBe(42);
+      // 类型层 lie：模拟非法调用方（JS 调用方或强转）
+      const promise = cancelable('key1', () => 42 as unknown as Promise<number>);
+      await expect(promise).rejects.toBeInstanceOf(TypeError);
+      await expect(promise).rejects.toThrow('must return a thenable value');
+    });
+
+    it('契约违规拒绝（非取消）不应触发 onCancel', async () => {
+      const { cancelable } = createCancelable();
+      const onCancel = vi.fn();
+      const promise = cancelable('key1', () => undefined as unknown as Promise<number>, { onCancel });
+      await expect(promise).rejects.toBeInstanceOf(TypeError);
+      expect(onCancel).not.toHaveBeenCalled();
     });
 
     it('应该传播异步函数的拒绝', async () => {

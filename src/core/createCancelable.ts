@@ -67,7 +67,9 @@ function createCancelable() {
    *
    * @typeParam T - 异步函数返回类型
    * @param key - 取消标识符，与 `cancel(key)` 配对使用
-   * @param asyncFunc - 要执行的异步函数
+   * @param asyncFunc - 要执行的异步函数，须返回可等待值（Promise/thenable）；
+   *   同步返回值/非可等待值为契约违规，调用以 `TypeError` 拒绝（消息含收到的类型）；
+   *   同步抛错仍以原始错误拒绝
    * @param options - 可选配置
    * @param options.onCancel - 取消时执行的清理回调（如底层 API 的 abort）；
    *   任何一次**生效的**取消都会触发（完成竞态中作废的取消不触发）。
@@ -78,7 +80,7 @@ function createCancelable() {
    */
   const cancelable = <T>(
     key: PropertyKey,
-    asyncFunc: () => T | Promise<T>,
+    asyncFunc: () => Promise<T>,
     options?: { onCancel?: () => void }
   ) => new Promise<T>((resolve, reject) => {
     const execution: Execution = { state: 'scheduled', cancelSignaled: false };
@@ -87,7 +89,7 @@ function createCancelable() {
     // once 触发即自清理——此后对该 key 的 cancel 为静默 no-op
     const off = eventEmitter.once(key, (error) => {
       execution.cancelSignaled = true;
-      queueMicrotask(() => {
+      Promise.resolve().then(() => {
         if (execution.state === 'settled') return; // 结算先落位 → 取消作废
         execution.state = 'settled';
         reject(error);
@@ -111,7 +113,7 @@ function createCancelable() {
     Promise.resolve().then(() => {
       if (execution.cancelSignaled) return;
       execution.state = 'running';
-      let ret: T | Promise<T>;
+      let ret: Promise<T>;
       try {
         ret = asyncFunc();
       }
@@ -120,17 +122,17 @@ function createCancelable() {
         return;
       }
       try {
-        // then 单次访问（对齐原生 Promise 采纳语义）；get/call 抛错按落定失败拒绝
-        const then = ret && (ret as PromiseLike<T>).then;
-        if (typeof then === 'function') {
-          then.call(ret as PromiseLike<T>, settleResolve, settleReject);
+        // 契约：仅支持返回可等待值（Promise/thenable）的异步函数——
+        // 单次 get 后校验（对齐原生采纳语义），非可等待值以 TypeError 拒绝
+        const then = (ret as PromiseLike<T> | null | undefined)?.then;
+        if (typeof then !== 'function') {
+          settleReject(new TypeError(`${String(key)} async call must return a thenable value (received ${typeof ret})`));
+          return;
         }
-        else {
-          settleResolve(ret as T);
-        }
+        then.call(ret as PromiseLike<T>, settleResolve, settleReject);
       }
       catch (error) {
-        settleReject(error);
+        settleReject(error); // then get/call 抛错（如 then 属性 getter）：按落定失败拒绝
       }
     });
   });

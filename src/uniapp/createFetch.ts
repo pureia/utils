@@ -385,10 +385,13 @@ function createFetch<R extends BaseRequestConfig>(
   /**
    * 以可取消的方式执行拦截器处理函数
    * @param key - 请求 key
-   * @param fn - 拦截器处理函数
+   * @param fn - 拦截器处理函数（可为同步；非 key 路径原样返回）
    * @returns 处理后的结果
    */
-  const runInterceptor = <T>(key: string | undefined, fn: () => T | Promise<T>) => key ? cancelable(key, fn) : fn();
+  // 拦截器处理函数类型为 C | Promise<C>（同步合法），故统一以 Promise.resolve 包装，
+  // 满足 cancelable 的「仅支持异步函数」契约；同步值/同步抛错行为与直接透传等价
+  const runInterceptor = <T>(key: string | undefined, fn: () => T | Promise<T>) =>
+    key ? cancelable(key, () => Promise.resolve(fn())) : fn();
 
   /**
    * 将异常归一化为失败结果（永不 reject 的收口点）
