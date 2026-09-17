@@ -114,7 +114,7 @@ function readSlotValue(kind: BoxedKind, node: object): unknown {
 }
 
 /**
- * 沿原型链挑候选槽种类：返回链上第一个包装原型对应的种类，链上没有包装原型则返回 undefined。
+ * 沿原型链挑候选槽种类：自 `start` 起，返回链上第一个包装原型对应的种类，链上没有包装原型则返回 undefined。
  *
  * 只用于「标签不可读」的场合。原型只是**线索**而非判定——链上有包装原型不等于真有对应内部槽
  * （如 `Object.create(Number.prototype)`），故调用方仍须做槽检查。
@@ -122,11 +122,11 @@ function readSlotValue(kind: BoxedKind, node: object): unknown {
  * 走到 `Object.prototype` 即可停：它与其后的 `null` 都不可能是包装原型，而任何包装原型都必在
  * 链上更早出现（省去「类实例 / `Map` 等负例」的最后一跳）。
  *
- * @param node - 待判定的对象（调用方保证非 null）
+ * @param start - 起始原型（由调用方读取后传入，避免同一对象被重复读一次原型）
  * @returns 候选槽种类，或 undefined
  */
-function kindByProtoChain(node: object): BoxedKind | undefined {
-  let proto = getPrototype(node);
+function kindByProtoChain(start: object | null): BoxedKind | undefined {
+  let proto = start;
   while (proto !== null && proto !== Object.prototype) {
     const kind = KIND_BY_PROTO.get(proto);
     if (kind) return kind;
@@ -142,14 +142,19 @@ function kindByProtoChain(node: object): BoxedKind | undefined {
  * 故再兜底探测其余三类——槽检查不可伪造，误判方向只可能是「漏探测」而非「误拆箱」。
  *
  * @param node - 待判定的对象（调用方保证非 null）
+ * @param start - 起始原型（由 `unbox` 读取后传入，避免重复读一次原型）
+ * @param probed - 调用方已探测并失败的候选槽种类；传入后不再用同一实参重探一次
  * @returns 拆箱后的原始值，或原对象
  */
-function unboxByProtoChain(node: object): unknown {
-  const hinted = kindByProtoChain(node);
+function unboxByProtoChain(node: object, start: object | null, probed?: BoxedKind): unknown {
+  // probed 命中时不再重探：同一对象、同一槽种类、同样的实参，槽检查的结论必然与调用方那次相同
+  const hinted = probed ?? kindByProtoChain(start);
   if (!hinted) return node;
 
-  const hit = readSlotValue(hinted, node);
-  if (hit !== NO_SLOT) return hit;
+  if (hinted !== probed) {
+    const hit = readSlotValue(hinted, node);
+    if (hit !== NO_SLOT) return hit;
+  }
 
   for (let i = 0; i < BOXED_KINDS.length; i++) {
     const kind = BOXED_KINDS[i];
@@ -213,7 +218,8 @@ function unbox(node: object): unknown {
     return kind ? readSlotValue(kind, node) : node;
   }
 
-  return unboxByProtoChain(node);
+  // 已读到的 proto 与已探测过的 byProto 一并传入：原型不必重读，槽不必重探
+  return unboxByProtoChain(node, proto, byProto);
 }
 
 /** 按节点产出的键比较器：由 resolveOptions 将调用方 cmp 包装为「每个节点一个比较器」的形态 */

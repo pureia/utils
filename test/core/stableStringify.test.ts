@@ -876,6 +876,21 @@ describe('stableStringify', () => {
       expect(() => stableStringify(throwing())).toThrow('has boom');
       expect(JSON.stringify(throwing())).toBe('{}');
     });
+
+    it('拆箱回退路径上 Proxy 的 getPrototypeOf 陷阱只调用一次（重构前为两次）', () => {
+      // 走到 unboxByProtoChain 需要：原型不是 Object.prototype / Array.prototype / null，且链上有
+      // Symbol.toStringTag。重构前 unbox 与其回退各读一次原型，陷阱因此被调用两次；原生不调用该陷阱。
+      let getPrototypeOfCalls = 0;
+      const proxy = new Proxy(Object.assign(Object.create(BigInt.prototype), { a: 1 }), {
+        getPrototypeOf: (target: object) => {
+          getPrototypeOfCalls++;
+          return Reflect.getPrototypeOf(target);
+        },
+      });
+
+      expect(stableStringify(proxy)).toBe('{"a":1}');
+      expect(getPrototypeOfCalls).toBe(1);
+    });
   });
 
   /* eslint-enable no-new-wrappers, unicorn/new-for-builtins */
