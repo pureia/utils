@@ -404,7 +404,7 @@ describe('stableStringify', () => {
       expect(stableStringify(new Number(3))).toBe('3');
       expect(stableStringify(new String('ab'))).toBe('"ab"');
       expect(stableStringify(new Boolean(false))).toBe('false');
-      expect(() => stableStringify(Object(5n))).toThrow(TypeError);
+      expect(() => stableStringify(new Object(5n))).toThrow(TypeError);
     });
 
     it('包装对象带自有属性时仍按其内部槽序列化', () => {
@@ -432,6 +432,70 @@ describe('stableStringify', () => {
       expect(stableStringify({ a: 1 }, { space: new Boolean(true) as any })).toBe(JSON.stringify({ a: 1 }, null, new Boolean(true) as any));
       expect(stableStringify({ a: 1 }, { space: new Date(0) as any })).toBe('{"a":1}');
       expect(stableStringify({ a: 1 }, { space: new Date(0) as any })).toBe(JSON.stringify({ a: 1 }, null, new Date(0) as any));
+    });
+  });
+
+  describe('toJSON 查找语义（对齐原生 JSON.stringify）', () => {
+    it('toJSON 为 accessor 时只读取一次，且 this 绑定不变', () => {
+      // 每次构造独立对象：两个断言各自消费新的读取计数
+      const make = () => {
+        let reads = 0;
+        const value = {
+          get toJSON() {
+            reads++;
+            return function (this: unknown) { return `read${reads}:${typeof this === 'object'}`; };
+          },
+        };
+        return { value, reads: () => reads };
+      };
+
+      const native = make();
+      expect(JSON.stringify(native.value)).toBe('"read1:true"');
+      expect(native.reads()).toBe(1);
+
+      const mine = make();
+      expect(stableStringify(mine.value)).toBe('"read1:true"');
+      expect(mine.reads()).toBe(1);
+    });
+
+    it('真值原始值不查找 toJSON（原生仅对 Object 与 BigInt 查找）', () => {
+      (String.prototype as any).toJSON = function () { return 'STR'; };
+      (Number.prototype as any).toJSON = function () { return 'NUM'; };
+      try {
+        expect(stableStringify({ a: 'x' })).toBe('{"a":"x"}');
+        expect(stableStringify([5, 0])).toBe('[5,0]');
+      }
+      finally {
+        delete (String.prototype as any).toJSON;
+        delete (Number.prototype as any).toJSON;
+      }
+    });
+
+    it('BigInt 原始值查找 toJSON，且 0n 与 1n 行为一致（含收到的属性 key）', () => {
+      // 以「收到的 key」判别，而非输出或调用次数：未修复时 0n（假值）会跳过 toJSON，
+      // 落到 JSON.stringify(0n)，而那条路径以根 key '' 调用同一个被污染的方法——
+      // 输出与调用次数都会假通过，只有 key 能区分这两条路径
+      let keys: unknown[] = [];
+      (BigInt.prototype as any).toJSON = function (key: unknown) { keys.push(key); return 'BIG'; };
+      try {
+        keys = [];
+        expect(stableStringify({ a: 1n })).toBe('{"a":"BIG"}');
+        expect(keys).toEqual(['a']);
+
+        keys = [];
+        expect(stableStringify({ a: 0n })).toBe('{"a":"BIG"}');
+        expect(keys).toEqual(['a']);
+      }
+      finally {
+        delete (BigInt.prototype as any).toJSON;
+      }
+    });
+
+    it('带 toJSON 的函数按原生语义被调用（函数亦属 Object）', () => {
+      const fn: any = () => {};
+      fn.toJSON = () => 42;
+      expect(stableStringify({ a: fn })).toBe('{"a":42}');
+      expect(stableStringify({ a: fn })).toBe(JSON.stringify({ a: fn }));
     });
   });
 });

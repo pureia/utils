@@ -203,8 +203,13 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
   // 恒等于 indent(level) + space，于是每节点只需一次 O(1) 拼接——既不需要 space.repeat(level)，
   // 也就不需要缓存它。compact 模式下 space 为空串，拼接恒得空串，无需分支。
   function stringify(parent: any, key: string, node: any, indent: string): string | undefined {
-    if (node && typeof node.toJSON === 'function') {
-      node = node.toJSON(key);
+    // toJSON 只在 Object（含函数）与 BigInt 上查找——对齐原生规范：GetV 仅对这两类进行。
+    // 真值原始值（字符串/数字/布尔）因此不再被查找；0n 与 1n 也不会再一查一不查。
+    // 属性只读取一次并以 call 显式绑定 this：accessor 形态的 toJSON 不会因二次读取被触发两遍。
+    const nodeType = typeof node;
+    if ((node !== null && (nodeType === 'object' || nodeType === 'function')) || nodeType === 'bigint') {
+      const toJSON = node.toJSON;
+      if (typeof toJSON === 'function') node = toJSON.call(node, key);
     }
 
     node = replacer.call(parent, parent, key, node);

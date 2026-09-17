@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `stableStringify`：`toJSON` 查找语义对齐原生——此前该属性被读取两次（accessor 形态的 `toJSON` 被触发两遍，第二次读取抛错时会把该异常抛给调用方；原生只读一次）；且在真值原始值（字符串/数字/布尔）上也会被查找（原生仅对 Object 与 BigInt 查找，函数仍属 Object 故保留，需原型污染才可触发）；同时修正 BigInt 原始值的不一致——此前 `1n` 查找而 `0n`（假值）被跳过并落到 `JSON.stringify(0n)`，两条路径收到的属性 key 不同
 - `stableStringify`：装箱原始值按内部槽拆箱——此前静默产出错值：`new Number(3)` → `{}`（原生 `3`）、`new String('ab')` → `{"0":"a","1":"b"}`（原生 `"ab"`）、`new Boolean(false)` → `{}`（原生 `false`）、`Object(5n)` → `{}`（原生抛 `TypeError`），带自有属性的包装对象同样按内部槽处理；`space` 传装箱 Number/String（如 `new Number(2)`）此前不缩进，现按拆箱后的值归一。拆箱先经原型快路径筛选（原型为 `Object.prototype`/`Array.prototype`/`null` 者直接返回），故数组不付代价、普通对象图仅多一次原型读取；实测相对修复前：普通对象图 +2.1%、类实例图 +4.4%、原始值大数组 +0.1%。**不影响去重语义**——仅装箱输入的输出改变，且「相同配置恒产出相同键」的确定性对全部输入保持
 - `stableStringify`：数组元素传给 toJSON/replacer 的 key 由数字索引改为字符串索引，与原生 `JSON.stringify` 行为对齐（此前与"签名与原生 replacer 一致"的注释声明不符）；`ReplacerFunc` 的 `key` 类型由 `string | number` 收窄为 `string`
 - `createCancelable`：修复"取消与落定竞态窗口"——取消裁决经微任务延后、与结算门闩仲裁（内部实现，无外部 API）：工作函数结果已产出（如底层回调已触发）但结算微任务尚未执行时，`cancel(key)` 不再覆盖已完成的结果；作废的取消不触发 `onCancel`（不再对已完成工作重复 abort）。`cancelable` 可选参数合并为 options 对象——`cancelable(key, fn, onCancel?, options?)` 改为 `cancelable(key, fn, options?: { onCancel? })`（破坏性签名调整，0.x 未使用阶段）
