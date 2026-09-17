@@ -48,6 +48,9 @@ const stringValueOf = String.prototype.valueOf;
 const booleanValueOf = Boolean.prototype.valueOf;
 const bigIntValueOf = BigInt.prototype.valueOf;
 
+/** 报错路径上读取原型自有属性的原语：同样在加载时捕获（避免报错途中受被改写的全局影响） */
+const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+
 /**
  * 装箱原始值的一类：标签、包装原型、槽检查，以及（规范要求另取时的）取值。
  *
@@ -301,9 +304,6 @@ const BRACKETS: Record<'list' | 'map', readonly [string, string]> = {
 function wrap(out: string[], brackets: readonly [string, string], indent: string): string {
   return out.length === 0 ? brackets[0] + brackets[1] : brackets[0] + out.join(',') + indent + brackets[1];
 }
-
-/** 报错路径上读取原型自有属性的原语：同样在加载时捕获（避免报错途中受被改写的全局影响） */
-const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 
 /** 本层边在报错文本里的写法：数组元素为 `index N`，对象属性为 `property 'k'`，空串键记作 `<anonymous>` */
 function edgeLabel(from: object, key: string): string {
