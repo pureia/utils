@@ -143,6 +143,19 @@ describe('stableStringify', () => {
       expect(stableStringify({ b: 1, a: 2 }, withDefault)).toBe('{"a":2,"b":1}');
     });
 
+    it('同一节点内的多次比较复用同一个 getter 对象', () => {
+      // getter 每节点构造一次并复用（而非每次比较新建）：比较器可把它当"本节点上下文"挂状态或做记忆化，
+      // 故一次调用内拿到的必须是同一个对象
+      const getters = new Set<unknown>();
+      stableStringify({ c: 3, a: 1, b: 2 }, {
+        cmp: (a, b, getter) => {
+          getters.add(getter);
+          return a.key < b.key ? -1 : 1;
+        },
+      });
+      expect(getters.size).toBe(1);
+    });
+
     it('嵌套对象中每一层使用相同的 cmp', () => {
       const obj = { b: { z: 6, y: 5 }, a: 3 };
       const result = stableStringify(obj, (a, b) => b.value - a.value);

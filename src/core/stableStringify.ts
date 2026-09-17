@@ -296,12 +296,7 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
   const cmp: NodeComparator | undefined = cmpOpt
     ? (node: Record<string, any>) => {
         const getter = { get: (k: string) => node[k] };
-        return (a: string, b: string) =>
-          cmpOpt(
-            { key: a, value: node[a] },
-            { key: b, value: node[b] },
-            getter
-          );
+        return (a: string, b: string) => cmpOpt({ key: a, value: node[a] }, { key: b, value: node[b] }, getter);
       }
     : void 0;
 
@@ -326,9 +321,7 @@ const BRACKETS: Record<'list' | 'map', readonly [string, string]> = {
  * @param indent - 本层缩进（仅非空容器使用）
  */
 function wrap(out: string[], brackets: readonly [string, string], indent: string): string {
-  return out.length === 0
-    ? brackets[0] + brackets[1]
-    : brackets[0] + out.join(',') + indent + brackets[1];
+  return out.length === 0 ? brackets[0] + brackets[1] : brackets[0] + out.join(',') + indent + brackets[1];
 }
 
 /**
