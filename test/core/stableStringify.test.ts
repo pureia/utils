@@ -399,6 +399,10 @@ describe('stableStringify', () => {
     });
   });
 
+  // 本组用例专门验证「装箱原始值」，必须真正构造包装对象。no-new-wrappers 与
+  // unicorn/new-for-builtins 拦截的正是这类构造，其本意是防误用；此处属有意为之，
+  // 故在块级关闭这两条规则（与文件内 no-sparse-arrays 的既有处置方式一致）
+  /* eslint-disable no-new-wrappers, unicorn/new-for-builtins */
   describe('装箱原始值（对齐原生 JSON.stringify）', () => {
     it('应拆箱 Number / String / Boolean / BigInt 包装对象', () => {
       expect(stableStringify(new Number(3))).toBe('3');
@@ -434,6 +438,7 @@ describe('stableStringify', () => {
       expect(stableStringify({ a: 1 }, { space: new Date(0) as any })).toBe(JSON.stringify({ a: 1 }, null, new Date(0) as any));
     });
   });
+  /* eslint-enable no-new-wrappers, unicorn/new-for-builtins */
 
   describe('toJSON 查找语义（对齐原生 JSON.stringify）', () => {
     it('toJSON 为 accessor 时只读取一次，且 this 绑定不变', () => {
@@ -471,7 +476,7 @@ describe('stableStringify', () => {
       }
     });
 
-    it('BigInt 原始值查找 toJSON，且 0n 与 1n 行为一致（含收到的属性 key）', () => {
+    it('原始值 BigInt 查找 toJSON，且 0n 与 1n 行为一致（含收到的属性 key）', () => {
       // 以「收到的 key」判别，而非输出或调用次数：未修复时 0n（假值）会跳过 toJSON，
       // 落到 JSON.stringify(0n)，而那条路径以根 key '' 调用同一个被污染的方法——
       // 输出与调用次数都会假通过，只有 key 能区分这两条路径
@@ -502,7 +507,8 @@ describe('stableStringify', () => {
   describe('数组长度在遍历前快照（对齐原生 JSON.stringify）', () => {
     it('replacer 追加元素不改变本次输出', () => {
       const native = [1, 2];
-      expect(JSON.stringify(native, function (this: any, key: string, value: any) { if (key === '0') native.push(3); return value; })).toBe('[1,2]');
+      // 该 replacer 体只用闭包变量 native、不使用 this，故用箭头函数（原生此回调的 this 绑定为持有者）
+      expect(JSON.stringify(native, (key: string, value: any) => { if (key === '0') native.push(3); return value; })).toBe('[1,2]');
 
       const mine = [1, 2];
       expect(stableStringify(mine, {

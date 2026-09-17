@@ -60,7 +60,7 @@ interface ResolvedOptions {
 const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
 
 /** Number / String / Boolean 包装对象的内部槽值即其 `valueOf()` 结果 */
-const unwrapBoxedValue = (node: object): unknown => (node as { valueOf(): unknown }).valueOf();
+const unwrapBoxedValue = (node: object): unknown => (node as { valueOf: () => unknown }).valueOf();
 
 /**
  * 装箱原始值标签 → 拆箱函数（原生在 replacer 之后按内部槽拆箱，故此处同样按内部槽还原）。
