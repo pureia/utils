@@ -917,7 +917,8 @@ describe('createFetch', () => {
 
         expect(result.ok).toBe(false);
         expect(result.code).toBe(FetchCode.INTERCEPTOR);
-        expect(result.msg).toBe('Converting circular structure to JSON');
+        // msg 取自该 TypeError 的文本；文本格式本身由 stableStringify 的原生对齐用例钉住
+        expect(result.msg).toContain('Converting circular structure to JSON');
       });
 
       it('getOriginalRequestConfig 抛错时应归一化为 -4 而非同步抛错', async () => {

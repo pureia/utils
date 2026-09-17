@@ -764,5 +764,55 @@ describe('stableStringify', () => {
     });
   });
 
+  /**
+   * 循环引用的 TypeError 文本按 V8（Node）口径：首行之后是 `--> starting at …` 路径详情。
+   * 逐形状与原生同进程**逐字节比对**，而不是写死本实现的输出。
+   */
+  describe('循环引用报错文本（对齐原生 JSON.stringify，V8 口径）', () => {
+    const messageOf = (fn: () => unknown): string => {
+      try {
+        fn();
+      }
+      catch (error) {
+        expect(error).toBeInstanceOf(TypeError);
+        return (error as TypeError).message;
+      }
+      throw new Error('期望抛出 TypeError，但没有抛');
+    };
+
+    const shapes: [string, () => unknown][] = [
+      ['根对象自引用', () => { const o: any = { a: 1 }; o.self = o; return o; }],
+      ['嵌套一跳', () => { const o: any = { a: 1 }; o.a = { b: o }; return o; }],
+      ['嵌套两跳', () => { const o: any = {}; o.a = { b: { c: o } }; return o; }],
+      ['数组自引用（索引闭合）', () => { const a: any[] = [1]; a.push(a); return a; }],
+      ['数组 → 对象 → 数组', () => { const a: any[] = [1]; const o: any = { a }; a.push(o); return a; }],
+      ['对象 → 数组 → 索引闭合', () => { const o: any = { list: [] }; o.list.push(o); return o; }],
+      ['类实例自引用', () => { class C { x = 1; } const c: any = new C(); c.self = c; return c; }],
+      ['类实例 → 普通对象 → 类实例', () => { class C { x = 1; } const c: any = new C(); c.o = { back: c }; return c; }],
+      ['原型为 null 的对象', () => { const o: any = Object.create(null); o.self = o; return o; }],
+      ['重复点不是根', () => { const a: any = {}; const b: any = { a }; a.b = b; return a; }],
+      ['toJSON 返回含环对象', () => { const o: any = {}; o.self = o; return { toJSON: () => o }; }],
+      ['并列的两个自引用对象（命中第一个）', () => { const a: any = {}; a.self = a; const b: any = {}; b.self = b; return { a, b }; }],
+      ['空键闭合 → <anonymous>', () => { const o: any = {}; o[''] = o; return o; }],
+      ['空键出现在中间跳', () => { const o: any = {}; o[''] = { b: o }; return o; }],
+      ['键含单引号（不转义）', () => { const o: any = {}; o[`a${String.fromCharCode(39)}b`] = o; return o; }],
+      ['数组下标 12', () => { const a: any[] = []; for (let i = 0; i < 12; i++) a.push(i); a.push(a); return a; }],
+      ['稀疏数组下标 4', () => { const a: any[] = []; a.length = 5; a[4] = a; return a; }],
+      ['Proxy 包类实例', () => { class P { x = 1; } const t: any = new P(); t.self = t; return new Proxy(t, {}); }],
+      ['Proxy getPrototypeOf → null', () => { const t: any = {}; t.self = t; return new Proxy(t, { getPrototypeOf: () => null }); }],
+      ['仅原型装着 Number 的自引用对象', () => { const o: any = Object.create(Number.prototype); o.self = o; return o; }],
+      ['原型的 constructor 是 getter（不触发）', () => { const o: any = Object.create({ get constructor() { return function FromGetter() {}; } }); o.self = o; return o; }],
+      ['原型的 constructor 是 undefined', () => { const o: any = Object.create({ constructor: undefined }); o.self = o; return o; }],
+      ['原型的 constructor 非函数', () => { const o: any = Object.create({ constructor: 5 }); o.self = o; return o; }],
+      ['原型的 constructor 是匿名函数', () => { const o: any = Object.create({ constructor() {} }); o.self = o; return o; }],
+    ];
+
+    for (const [name, make] of shapes) {
+      it(`${name}：与原生逐字节一致`, () => {
+        expect(messageOf(() => stableStringify(make()))).toBe(messageOf(() => JSON.stringify(make())));
+      });
+    }
+  });
+
   /* eslint-enable no-new-wrappers, unicorn/new-for-builtins */
 });

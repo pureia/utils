@@ -293,6 +293,73 @@ function wrap(out: string[], brackets: readonly [string, string], indent: string
   return out.length === 0 ? brackets[0] + brackets[1] : brackets[0] + out.join(',') + indent + brackets[1];
 }
 
+/** 报错路径上读取原型自有属性的原语：同样在加载时捕获（避免报错途中受被改写的全局影响） */
+const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+
+/** 本层边在报错文本里的写法：数组元素为 `index N`，对象属性为 `property 'k'`，空串键记作 `<anonymous>` */
+function edgeLabel(from: object, key: string): string {
+  return Array.isArray(from) ? `index ${key}` : key === '' ? '<anonymous>' : `property '${key}'`;
+}
+
+/**
+ * 构造器名（仅供报错文本）：按 V8 的口径沿原型链找**自有 data 属性** `constructor`，取其函数的 `name`。
+ *
+ * getter 一律不触发、非函数值继续上行，走到链尾回落 `'Object'`（`Object.create(null)` 亦然）。
+ *
+ * 已知与 V8 不一致（V8 读的是函数内部名，userland 取不到）：`name` 被改写为其他值时此处读到改写后的值；
+ * bound 函数的 `name` 形如 `bound X`，V8 会跳过它继续上行。
+ *
+ * @param node - 环上的容器节点（调用方保证非 null）
+ * @returns 构造器名，取不到时为 `'Object'`
+ */
+function constructorName(node: object): string {
+  let proto = getPrototype(node);
+  while (proto !== null) {
+    const descriptor = getOwnPropertyDescriptor(proto, 'constructor');
+    if (descriptor && 'value' in descriptor && typeof descriptor.value === 'function') {
+      const name: unknown = (descriptor.value as { name?: unknown }).name;
+      if (typeof name === 'string' && name !== '') return name;
+    }
+    proto = getPrototype(proto);
+  }
+  return 'Object';
+}
+
+/**
+ * 循环引用的报错文本：按 V8（Node）口径渲染环上的路径——首行指明被重复进入的节点，
+ * 中间每跳一行，末行指明闭合的那条边。非 V8 引擎（如 uni-app 的 JSCore）原生措辞不同，此处不对齐它们。
+ *
+ * @param path - 调用级路径节点集（Set，迭代顺序即 DFS 栈序）
+ * @param keys - 与 `path` 插入顺序一一对应的边 key 数组
+ * @param repeated - 被重复进入的节点（环的起点）
+ * @param parent - 当前节点的父容器（闭合边的来源）
+ * @param key - 当前节点在父容器里的 key（闭合边）
+ * @returns 报错信息
+ */
+function circularMessage(path: Set<object>, keys: string[], repeated: object, parent: object, key: string): string {
+  const lines = [
+    'Converting circular structure to JSON',
+    `    --> starting at object with constructor '${constructorName(repeated)}'`,
+  ];
+
+  let index = 0;
+  let reached = false;
+  let previous: object = repeated;
+  for (const node of path) {
+    if (!reached) {
+      index++;
+      if (node === repeated) reached = true;
+      continue;
+    }
+    lines.push(`    |     ${edgeLabel(previous, keys[index])} -> object with constructor '${constructorName(node)}'`);
+    previous = node;
+    index++;
+  }
+
+  lines.push(`    --- ${edgeLabel(parent, key)} closes the circle`);
+  return lines.join('\n');
+}
+
 /**
  * 确定性版本的 `JSON.stringify`：对象键按 UTF-16 码元排序，相同内容恒产出相同字符串。
  *
@@ -307,7 +374,7 @@ function wrap(out: string[], brackets: readonly [string, string], indent: string
  * @param obj - 要序列化的值
  * @param opts - 选项对象；也可直接传自定义比较函数（见重载，等价于 `opts.cmp` 的快捷形式）
  * @returns 稳定的 JSON 字符串；顶层值为 `undefined` 时返回 `undefined`
- * @throws {TypeError} 遇循环引用且 `cycles` 未启用时
+ * @throws {TypeError} 遇循环引用且 `cycles` 未启用时；文本按 V8（Node）口径，含 `--> starting at …` 路径详情
  *
  * @example
  * // 基本排序
@@ -324,7 +391,11 @@ function stableStringify(obj: any, cmp: CmpFunc): string | undefined;
 function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): string | undefined {
   const { space, cycles, replacer, cmp } = resolveOptions(opts);
 
-  const seen = new Set<object>();
+  // 循环引用防护：成员判定仍用 Set（热路径与改动前一致），另外用一个与插入顺序一一对应的 key 数组
+  // 记录「进入该节点时那条边」的 key（DFS 下进出都是栈尾，push/pop 即配对）。仅在抛出时才需要这份
+  // 路径信息——用 Map 直接存 key 会拖慢热路径（实测深嵌套 +14% / 大数组 +12%），故拆成两半
+  const onPath = new Set<object>();
+  const pathKeys: string[] = [];
 
   // 分隔符仅由 space 决定，提升为调用级常量
   const colonSeparator = space ? ': ' : ':';
@@ -357,18 +428,19 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
       if (typeof node !== 'object' || node === null) return JSON.stringify(node);
     }
 
-    if (seen.has(node)) {
+    if (onPath.has(node)) {
       if (cycles) return JSON.stringify('__cycle__');
-      throw new TypeError('Converting circular structure to JSON');
+      throw new TypeError(circularMessage(onPath, pathKeys, node, parent, key));
     }
 
     // 子节点缩进 = 本层缩进 + 一级缩进；同一值同时用作成员的缩进前缀
     const childIndent = indent + space;
 
     // 循环引用防护的进入-离开必须成对：进入点与离开点各只有一处，新增容器分支也不会遗漏配对的
-    // seen.delete。不使用 try/finally：抛错会中止整个调用，而 seen 是调用级状态，
+    // onPath.delete。不使用 try/finally：抛错会中止整个调用，而 onPath 是调用级状态，
     // 故无需在异常路径上回滚。
-    seen.add(node);
+    onPath.add(node);
+    pathKeys.push(key);
 
     let result: string;
 
@@ -403,7 +475,8 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
       result = wrap(out, BRACKETS.map, indent);
     }
 
-    seen.delete(node);
+    onPath.delete(node);
+    pathKeys.pop();
     return result;
   }
 
