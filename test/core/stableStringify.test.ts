@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { stableStringify } from '@purea/utils';
+import { afterEach, describe, expect, it } from 'vitest';
 
 describe('stableStringify', () => {
   describe('基本对象 key 排序', () => {
@@ -677,4 +677,92 @@ describe('stableStringify', () => {
       expect(stableStringify(requestConfig(), { space: 2 })).toBe('{\n  "header": {\n    "Content-Type": "application/json"\n  },\n  "host": "https://api.example.com",\n  "isDedup": false,\n  "method": "GET",\n  "timeout": 10000,\n  "url": "/users"\n}');
     });
   });
+
+  /* eslint-disable no-new-wrappers, unicorn/new-for-builtins */
+
+  /**
+   * 内置原语被改写 / 替换时，装箱判定与取值不受影响——判定只认内部槽（含 Symbol.toStringTag 的取用）。
+   *
+   * 靠**与原生同进程逐字节比对**钉住，而不是写死本实现的输出。
+   */
+
+  /** 临时改写一个全局属性，afterEach 无条件还原（按描述符，含 symbol 键） */
+  let restores: (() => void)[] = [];
+  function patch(target: any, key: PropertyKey, value: unknown): void {
+    const descriptor = Object.getOwnPropertyDescriptor(target, key);
+    target[key] = value;
+    restores.push(() => {
+      if (descriptor) Object.defineProperty(target, key, descriptor);
+      else Reflect.deleteProperty(target, key);
+    });
+  }
+  afterEach(() => {
+    const pending = restores;
+    restores = [];
+    for (const restore of pending) restore();
+  });
+
+  describe('内置原语被改写时的判定与取值（对齐原生 JSON.stringify）', () => {
+    it('改写 Number.prototype.valueOf：无内部槽的对象仍按普通对象序列化', () => {
+      const fake: any = Object.assign(Object.create(Number.prototype), { a: 1 });
+      const expected = JSON.stringify(fake);
+      patch(Number.prototype, 'valueOf', () => 42);
+      expect(stableStringify(fake)).toBe(expected);
+      expect(stableStringify(fake)).toBe('{"a":1}');
+    });
+
+    it('改写 Boolean.prototype.valueOf：无内部槽的对象不被拆箱', () => {
+      const fake: any = Object.assign(Object.create(Boolean.prototype), { a: 1 });
+      const expected = JSON.stringify(fake);
+      patch(Boolean.prototype, 'valueOf', () => true);
+      expect(stableStringify(fake)).toBe(expected);
+    });
+
+    it('改写 String.prototype.valueOf：不再抛 TypeError（取值路径不外溢误判）', () => {
+      const fake: any = Object.assign(Object.create(String.prototype), { a: 1 });
+      const expected = JSON.stringify(fake);
+      patch(String.prototype, 'valueOf', () => 'patched');
+      expect(stableStringify(fake)).toBe(expected);
+    });
+
+    it('改写 BigInt.prototype.valueOf：不再抛「Do not know how to serialize a BigInt」', () => {
+      const fake: any = Object.assign(Object.create(BigInt.prototype), { a: 1 });
+      const expected = JSON.stringify(fake);
+      patch(BigInt.prototype, 'valueOf', () => 1n);
+      expect(stableStringify(fake)).toBe(expected);
+    });
+
+    it('真包装值在改写后仍按 ToNumber 取值（value 路径保持实时求值，与原生同值）', () => {
+      const real = new Number(7);
+      patch(Number.prototype, 'valueOf', () => 42);
+      expect(stableStringify(real)).toBe(JSON.stringify(real));
+      expect(stableStringify(real)).toBe('42');
+    });
+
+    it('全局 Number 被替换：装箱取值仍走 ToNumber 而非被替换的函数对象', () => {
+      const expected = JSON.stringify(new Number(7));
+      patch(globalThis, 'Number', new Proxy(Number, { apply: () => 99 }));
+      expect(stableStringify(new Number(7))).toBe(expected);
+    });
+
+    it('全局 String 被替换：装箱取值仍走 ToString 而非被替换的函数对象', () => {
+      const expected = JSON.stringify(new String('ab'));
+      patch(globalThis, 'String', new Proxy(String, { apply: () => 'hijacked' }));
+      expect(stableStringify(new String('ab'))).toBe(expected);
+    });
+
+    it('全局 Symbol 被替换：判定仍按真实 @@toStringTag 走', () => {
+      const boxed: any = new Boolean(false);
+      Object.setPrototypeOf(boxed, Number.prototype);
+      Object.defineProperty(boxed, Symbol.toStringTag, { value: 'Foo' });
+      const expected = JSON.stringify(boxed);
+      patch(globalThis, 'Symbol', new Proxy(Symbol, {
+        get: (target, key, receiver) => (key === 'toStringTag' ? 'fake-tag' : Reflect.get(target, key, receiver)),
+      }));
+      expect(stableStringify(boxed)).toBe(expected);
+      expect(stableStringify(boxed)).toBe('false');
+    });
+  });
+
+  /* eslint-enable no-new-wrappers, unicorn/new-for-builtins */
 });

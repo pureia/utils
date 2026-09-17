@@ -23,11 +23,22 @@ interface StableStringifyOptions {
 }
 
 /**
- * 品牌判定原语：在模块加载时捕获——`Object` 与 `Object.prototype` 上的方法可被调用方改写，
- * 捕获后判定不受其影响（与下方槽检查方法同理）
+ * 判定与取值所用的原语：在模块加载时捕获——`Object` / `Object.prototype` 上的方法、四个包装原型上的
+ * `valueOf`，以及 `Number` / `String` / `Symbol.toStringTag` 都可被调用方改写或替换，
+ * 捕获后判定与取值都不受其影响。
+ *
+ * **捕获的只是「判定与取值所用的函数对象」**：`value` 仍沿当时的原型链求值（见 `BoxedKind#value`），
+ * 故「包装对象被改写 `valueOf`/`toString` 会抛错」这一原生语义不受影响。
  */
 const getPrototype = Object.getPrototypeOf;
 const objectToString = Object.prototype.toString;
+const toStringTag = Symbol.toStringTag;
+const numberCtor = Number;
+const stringCtor = String;
+const numberValueOf = Number.prototype.valueOf;
+const stringValueOf = String.prototype.valueOf;
+const booleanValueOf = Boolean.prototype.valueOf;
+const bigIntValueOf = BigInt.prototype.valueOf;
 
 /**
  * 装箱原始值的一类：标签、包装原型、槽检查，以及（规范要求另取时的）取值。
@@ -54,10 +65,10 @@ interface BoxedKind {
  * 的标签必然取自内部槽（规范：无该属性则回落到 builtinTag），既不可伪造，读取也不会触发用户代码。
  */
 const BOXED_KINDS: readonly BoxedKind[] = [
-  { label: '[object Number]', proto: Number.prototype, slot: (node) => Number.prototype.valueOf.call(node), value: (node) => Number(node) },
-  { label: '[object String]', proto: String.prototype, slot: (node) => String.prototype.valueOf.call(node), value: (node) => String(node) },
-  { label: '[object Boolean]', proto: Boolean.prototype, slot: (node) => Boolean.prototype.valueOf.call(node) },
-  { label: '[object BigInt]', proto: BigInt.prototype, slot: (node) => BigInt.prototype.valueOf.call(node) },
+  { label: '[object Number]', proto: Number.prototype, slot: (node) => numberValueOf.call(node), value: (node) => numberCtor(node) },
+  { label: '[object String]', proto: String.prototype, slot: (node) => stringValueOf.call(node), value: (node) => stringCtor(node) },
+  { label: '[object Boolean]', proto: Boolean.prototype, slot: (node) => booleanValueOf.call(node) },
+  { label: '[object BigInt]', proto: BigInt.prototype, slot: (node) => bigIntValueOf.call(node) },
 ];
 
 /** 标签 → 槽种类（链上无 `Symbol.toStringTag` 时挑候选用，见 `BoxedKind#label`） */
@@ -186,7 +197,7 @@ function unbox(node: object): unknown {
 
   // 链上无标签：Object.prototype.toString 的标签必出自内部槽（规范：无该属性则回落到 builtinTag），
   // 不可伪造，可直接用作候选；此路径不触发任何用户代码
-  if (!(Symbol.toStringTag in node)) {
+  if (!(toStringTag in node)) {
     const kind = KIND_BY_LABEL.get(objectToString.call(node));
     return kind ? readSlotValue(kind, node) : node;
   }
