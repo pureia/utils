@@ -398,4 +398,40 @@ describe('stableStringify', () => {
       }
     });
   });
+
+  describe('装箱原始值（对齐原生 JSON.stringify）', () => {
+    it('应拆箱 Number / String / Boolean / BigInt 包装对象', () => {
+      expect(stableStringify(new Number(3))).toBe('3');
+      expect(stableStringify(new String('ab'))).toBe('"ab"');
+      expect(stableStringify(new Boolean(false))).toBe('false');
+      expect(() => stableStringify(Object(5n))).toThrow(TypeError);
+    });
+
+    it('包装对象带自有属性时仍按其内部槽序列化', () => {
+      const boxed = new Number(3);
+      (boxed as any).x = 1;
+      expect(stableStringify(boxed)).toBe('3');
+      expect(stableStringify(boxed)).toBe(JSON.stringify(boxed));
+    });
+
+    it('嵌套在对象与数组中的包装对象同样拆箱', () => {
+      const value = { a: new Number(1), b: [new String('s')] };
+      expect(stableStringify(value)).toBe('{"a":1,"b":["s"]}');
+      expect(stableStringify(value)).toBe(JSON.stringify(value));
+    });
+
+    it('space 传装箱 Number / String 时应与原生一致地缩进', () => {
+      expect(stableStringify({ a: 1 }, { space: new Number(2) as any })).toBe('{\n  "a": 1\n}');
+      expect(stableStringify({ a: 1 }, { space: new Number(2) as any })).toBe(JSON.stringify({ a: 1 }, null, new Number(2) as any));
+      expect(stableStringify({ a: 1 }, { space: new String('\t') as any })).toBe('{\n\t"a": 1\n}');
+      expect(stableStringify({ a: 1 }, { space: new String('\t') as any })).toBe(JSON.stringify({ a: 1 }, null, new String('\t') as any));
+    });
+
+    it('space 传装箱 Boolean 或其他对象时不缩进（原生仅拆箱 Number / String）', () => {
+      expect(stableStringify({ a: 1 }, { space: new Boolean(true) as any })).toBe('{"a":1}');
+      expect(stableStringify({ a: 1 }, { space: new Boolean(true) as any })).toBe(JSON.stringify({ a: 1 }, null, new Boolean(true) as any));
+      expect(stableStringify({ a: 1 }, { space: new Date(0) as any })).toBe('{"a":1}');
+      expect(stableStringify({ a: 1 }, { space: new Date(0) as any })).toBe(JSON.stringify({ a: 1 }, null, new Date(0) as any));
+    });
+  });
 });

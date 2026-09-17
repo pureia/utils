@@ -35,7 +35,7 @@ type ReplacerFunc = (this: any, parent: any, key: string, value: any) => any;
  * `stableStringify` 选项；未提供的字段按原生 `JSON.stringify` 的默认语义处理。
  */
 interface StableStringifyOptions {
-  /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元 */
+  /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元；装箱 Number/String 按拆箱后的值处理 */
   space?: string | number;
   /** 自定义 key 排序比较函数；也可直接传比较函数作为第二个参数 */
   cmp?: CmpFunc;
@@ -59,6 +59,39 @@ interface ResolvedOptions {
 /** 恒等 replacer：未提供 replacer 时的默认值（模块级常量，免去每次调用重新分配） */
 const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
 
+/** Number / String / Boolean 包装对象的内部槽值即其 `valueOf()` 结果 */
+const unwrapBoxedValue = (node: object): unknown => (node as { valueOf(): unknown }).valueOf();
+
+/**
+ * 装箱原始值标签 → 拆箱函数（原生在 replacer 之后按内部槽拆箱，故此处同样按内部槽还原）。
+ *
+ * 标签经 `Object.prototype.toString` 取得而非 `instanceof`：后者跨 realm 失效，而内部槽判定与
+ * realm 无关。BigInt 包装没有对应的全局构造器，只能经 `BigInt.prototype.valueOf` 取其内部槽。
+ */
+const BOXED_UNWRAPPERS: Record<string, (node: object) => unknown> = {
+  '[object Number]': unwrapBoxedValue,
+  '[object String]': unwrapBoxedValue,
+  '[object Boolean]': unwrapBoxedValue,
+  '[object BigInt]': node => BigInt.prototype.valueOf.call(node),
+};
+
+/**
+ * 按内部槽拆箱装箱原始值；非装箱对象原样返回。
+ *
+ * 先做一次廉价原型筛选：原型为 `Object.prototype` / `Array.prototype` / `null` 者必非装箱对象，
+ * 直接返回——普通对象图因而只多一次原型读取；仅可疑原型才做一次精确标签判定。
+ *
+ * @param node - 待判定的对象（调用方保证非 null）
+ * @returns 拆箱后的原始值，或原对象
+ */
+function unbox(node: object): unknown {
+  const proto = Object.getPrototypeOf(node);
+  if (proto === Object.prototype || proto === Array.prototype || proto === null) return node;
+
+  const unwrap = BOXED_UNWRAPPERS[Object.prototype.toString.call(node)];
+  return unwrap ? unwrap(node) : node;
+}
+
 /**
  * Split Phase：把「公共选项 / 重载判别」归一为遍历期使用的内部记录。
  *
@@ -78,12 +111,16 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
   // - 其余类型（boolean 等）：原生按无缩进处理
   let space = '';
   if (isObj && opts.space !== undefined) {
-    if (typeof opts.space === 'number') {
-      const n = Math.trunc(opts.space);
+    // 原生先按内部槽拆箱装箱的 Number / String 再归一（Boolean 包装与其他对象不拆箱，即不缩进）。
+    // 类型上 space 是 string | number，装箱形态只可能来自未受类型约束的调用方，故此处按 unknown 处理
+    const raw: unknown = opts.space;
+    const value = typeof raw === 'object' && raw !== null ? unbox(raw) : raw;
+    if (typeof value === 'number') {
+      const n = Math.trunc(value);
       space = n >= 1 ? ' '.repeat(Math.min(10, n)) : '';
     }
-    else if (typeof opts.space === 'string') {
-      space = opts.space.slice(0, 10);
+    else if (typeof value === 'string') {
+      space = value.slice(0, 10);
     }
   }
 
@@ -127,7 +164,7 @@ function wrap(out: string[], open: string, close: string, indent: string): strin
 }
 
 /**
- * 确定性版本的 `JSON.stringify`：对象键按 UTF-16 码点排序，相同内容恒产出相同字符串。
+ * 确定性版本的 `JSON.stringify`：对象键按 UTF-16 码元排序，相同内容恒产出相同字符串。
  *
  * 与原生 `JSON.stringify` 的可观察差异：
  * - `replacer` 签名为 `(parent, key, value)`，第一个参数是父对象（替代原生的 `this` 绑定）
@@ -174,6 +211,13 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
     if (node === undefined) return;
 
     if (typeof node !== 'object' || node === null) return JSON.stringify(node);
+
+    // 装箱原始值按内部槽拆箱（对齐原生：位于 replacer 之后、容器分派之前）。
+    // 数组必非装箱对象，跳过判定以免为数组多付一次原型读取；拆箱可能还原为原始值，故需重判。
+    if (!Array.isArray(node)) {
+      node = unbox(node);
+      if (typeof node !== 'object' || node === null) return JSON.stringify(node);
+    }
 
     if (seen.has(node)) {
       if (cycles) return JSON.stringify('__cycle__');
