@@ -45,6 +45,71 @@ interface StableStringifyOptions {
   cycles?: boolean;
 }
 
+/** 按节点产出的键比较器：由 resolveOptions 将调用方 cmp 包装为「每个节点一个比较器」的形态 */
+type NodeComparator = (node: Record<string, any>) => (a: string, b: string) => number;
+
+/** 遍历期使用的内部规范化选项（不对外导出）：公共选项/重载经 resolveOptions 归一后的结果 */
+interface ResolvedOptions {
+  space: string;
+  cycles: boolean;
+  replacer: ReplacerFunc;
+  cmp?: NodeComparator;
+}
+
+/** 恒等 replacer：未提供 replacer 时的默认值（模块级常量，免去每次调用重新分配） */
+const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
+
+/**
+ * Split Phase：把「公共选项 / 重载判别」归一为遍历期使用的内部记录。
+ *
+ * 只读 opts、不接触遍历状态——选项语义的变化（新增选项、调整归一规则、重载判别）
+ * 集中在此处，不再与遍历本体耦合。
+ *
+ * @param opts - 第二参数：选项对象，或直接传入的自定义比较函数
+ * @returns 归一后的内部选项
+ */
+function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): ResolvedOptions {
+  const isObj = opts != null && typeof opts === 'object';
+
+  // 缩进对齐原生 JSON.stringify 语义：
+  // - 数字：ToIntegerOrInfinity 截断后钳制到 [0, 10]（负数/NaN → 无缩进；Infinity/超大值 → 10，
+  //   避免 strRepeat 无限循环与内存压力）
+  // - 字符串：仅取前 10 个码元
+  // - 其余类型（boolean 等）：原生按无缩进处理
+  let space = '';
+  if (isObj && opts.space !== undefined) {
+    if (typeof opts.space === 'number') {
+      const n = Math.trunc(opts.space);
+      space = n >= 1 ? ' '.repeat(Math.min(10, n)) : '';
+    }
+    else if (typeof opts.space === 'string') {
+      space = opts.space.slice(0, 10);
+    }
+  }
+
+  const replacer = isObj && typeof opts.replacer === 'function' ? opts.replacer : identityReplacer;
+
+  const cmpOpt = typeof opts === 'function' ? opts : (isObj ? opts.cmp : void 0);
+  // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）；
+  // 仅当调用方 cmp 声明了第三个参数（按 key 取值函数）时才注入 getter，
+  // 与原始 json-stable-stringify 的调用约定保持一致。
+  // 「是否注入 getter」只取决于调用方函数形态、单次调用内恒定，故在此判定一次而非每个节点重算。
+  const withGetter = cmpOpt ? cmpOpt.length > 2 : false;
+  const cmp: NodeComparator | undefined = cmpOpt
+    ? (node: Record<string, any>) => {
+        const get = withGetter ? (k: string) => node[k] : void 0;
+        return (a: string, b: string) =>
+          cmpOpt(
+            { key: a, value: node[a] },
+            { key: b, value: node[b] },
+            get ? { get } : void 0
+          );
+      }
+    : void 0;
+
+  return { space, cycles: isObj && opts.cycles === true, replacer, cmp };
+}
+
 /**
  * 确定性版本的 `JSON.stringify`：对象键按 UTF-16 码点排序，相同内容恒产出相同字符串。
  *
@@ -74,43 +139,7 @@ interface StableStringifyOptions {
 function stableStringify(obj: any, opts?: StableStringifyOptions): string | undefined;
 function stableStringify(obj: any, cmp: CmpFunc): string | undefined;
 function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): string | undefined {
-  const isObj = opts != null && typeof opts === 'object';
-
-  // 缩进对齐原生 JSON.stringify 语义：
-  // - 数字：ToIntegerOrInfinity 截断后钳制到 [0, 10]（负数/NaN → 无缩进；Infinity/超大值 → 10，
-  //   避免 strRepeat 无限循环与内存压力）
-  // - 字符串：仅取前 10 个码元
-  // - 其余类型（boolean 等）：原生按无缩进处理
-  let space = '';
-  if (isObj && opts.space !== undefined) {
-    if (typeof opts.space === 'number') {
-      const n = Math.trunc(opts.space);
-      space = n >= 1 ? ' '.repeat(Math.min(10, n)) : '';
-    }
-    else if (typeof opts.space === 'string') {
-      space = opts.space.slice(0, 10);
-    }
-  }
-  const cycles = isObj && opts.cycles === true;
-
-  const defaultReplacer: ReplacerFunc = (_parent, _key, value) => value;
-  const replacer = isObj && typeof opts.replacer === 'function' ? opts.replacer : defaultReplacer;
-
-  const cmpOpt = typeof opts === 'function' ? opts : (isObj ? opts.cmp : void 0);
-  // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）；
-  // 仅当调用方 cmp 声明了第三个参数（按 key 取值函数）时才注入 getter，
-  // 与原始 json-stable-stringify 的调用约定保持一致
-  const cmp = cmpOpt
-    ? (node: Record<string, any>) => {
-        const get = cmpOpt.length > 2 ? (k: string) => node[k] : void 0;
-        return (a: string, b: string) =>
-          cmpOpt(
-            { key: a, value: node[a] },
-            { key: b, value: node[b] },
-            get ? { get } : void 0
-          );
-      }
-    : void 0;
+  const { space, cycles, replacer, cmp } = resolveOptions(opts);
 
   const seen = new Set<object>();
 
