@@ -5,14 +5,22 @@ type CmpFunc = (
   getter?: { get: (key: string) => any }
 ) => number;
 
-/** 过滤/转换函数：签名与原生 `JSON.stringify` 的 replacer 一致（key 恒为字符串，数组元素即索引字符串），返回 `undefined` 时跳过该属性 */
+/**
+ * 过滤/转换函数：比原生 `JSON.stringify` 的 replacer **多一个前导 `parent` 参数**——原生是
+ * `(key, value)` 加 `this` 绑定父对象，此处 `this` 与 `parent` 都是父对象；`key` 恒为字符串
+ * （数组元素即索引字符串），返回 `undefined` 时跳过该属性。
+ *
+ * 照原生习惯写两参会**静默错位**（第一参收到父对象、第二参收到 key，不报错），而少写形参在类型上
+ * 合法、编译期拦不住。此处只声明、不做运行期嗅探——`Function.length` 对带默认值或 rest 的写法不可靠
+ * （本文件对 `cmp` 已因此废掉该嗅探）。
+ */
 type ReplacerFunc = (this: any, parent: any, key: string, value: any) => any;
 
 /**
  * `stableStringify` 选项；未提供的字段按原生 `JSON.stringify` 的默认语义处理。
  */
 interface StableStringifyOptions {
-  /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元，装箱 Number/String 按拆箱后的值处理，其余类型（boolean/对象等）按无缩进 */
+  /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元，装箱 Number/String 按拆箱后的值处理，其余类型（boolean/对象等）按无缩进。**类型只收 `string | number`**（与原生 lib 的类型一致）：装箱形态是运行期兼容、供未受类型约束的调用方使用，TS 调用方需自行断言 */
   space?: string | number;
   /** 自定义 key 排序比较函数；也可直接传比较函数作为第二个参数 */
   cmp?: CmpFunc;
@@ -261,7 +269,8 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
   // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）与按 key 取值的
   // getter。**getter 无条件注入**——不按 `Function.length` 嗅探：第三参带默认值或 rest 时 length 停在 2，
   // 嗅探会让这类比较器静默拿不到 getter；两参比较器只是多收一个被忽略的实参。
-  // getter 每节点构造一次并复用。
+  // getter 每节点构造一次并复用。比较器每次比较都重新取 `node[a]` / `node[b]`（访问器属性因此会被
+  // 多次求值，且每次比较新建两个 { key, value } 对象）——这是既有行为，改动它会变更可观察语义。
   const cmp: NodeComparator | undefined = cmpOpt
     ? (node: Record<string, any>) => {
         const getter = { get: (k: string) => node[k] };
