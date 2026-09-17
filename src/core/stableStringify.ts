@@ -206,7 +206,7 @@ function wrap(out: string[], open: string, close: string, indent: string): strin
  * - `replacer` 签名为 `(parent, key, value)`，第一个参数是父对象（替代原生的 `this` 绑定）
  * - `cycles: true` 时将循环引用序列化为 `"__cycle__"` 而非抛错
  * - 类数组整数键（如 `"2"`/`"10"`）不按数值优先排序（原生会将其排在最前），
- *   与其余键统一按码点序排序——确定性不受影响，但跨工具哈希比对时需注意
+ *   与其余键统一按码元序排序——确定性不受影响，但跨工具哈希比对时需注意
  *
  * 重载：第二参数要么是选项对象，要么是自定义比较函数，二者互斥（运行时按 typeof 判别）。
  *
@@ -268,7 +268,7 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
     // 子节点缩进 = 本层缩进 + 一级缩进；同一值同时用作成员的缩进前缀
     const childIndent = indent + space;
 
-    // 环保护的进入-离开必须成对：进入点与离开点各只有一处，新增容器分支也不会遗漏配对的
+    // 循环引用防护的进入-离开必须成对：进入点与离开点各只有一处，新增容器分支也不会遗漏配对的
     // seen.delete（原先两个分支各自 add/delete 一遍）。不使用 try/finally：抛错会中止整个调用，
     // 而 seen 是调用级状态，故无需在异常路径上回滚。
     seen.add(node);
