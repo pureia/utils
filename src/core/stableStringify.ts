@@ -111,6 +111,22 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
 }
 
 /**
+ * 包裹已序列化的成员，产出容器字面量。
+ *
+ * 空容器恒输出紧凑括号（与原生 `JSON.stringify` 一致，即使 pretty-print 模式）；
+ * 否则逐项以逗号连接、以本层缩进收尾。`open`/`close` 直接收字面量括号，
+ * 免去按 `'[]' | '{}'` 标签二次解码同一判别。
+ *
+ * @param out - 已各自带缩进前缀的成员字符串
+ * @param open - 开括号字面量
+ * @param close - 闭括号字面量
+ * @param indent - 本层缩进（仅非空容器使用）
+ */
+function wrap(out: string[], open: string, close: string, indent: string): string {
+  return out.length === 0 ? open + close : open + out.join(',') + indent + close;
+}
+
+/**
  * 确定性版本的 `JSON.stringify`：对象键按 UTF-16 码点排序，相同内容恒产出相同字符串。
  *
  * 与原生 `JSON.stringify` 的可观察差异：
@@ -143,24 +159,13 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
 
   const seen = new Set<object>();
 
-  // 缩进/分隔符仅由 space 决定，提升为调用级常量并按需缓存（避免大对象深层嵌套下
-  // 每个节点重复 space.repeat(level) 的字符串分配；原生 JSON.stringify 同样缓存）
-  const indentCache = space ? new Map<number, string>() : null;
+  // 分隔符仅由 space 决定，提升为调用级常量
   const colonSeparator = space ? ': ' : ':';
 
-  function stringify(parent: any, key: string, node: any, level: number): string | undefined {
-    let indent = '';
-    if (space) {
-      const cached = indentCache!.get(level);
-      if (cached !== undefined) {
-        indent = cached;
-      }
-      else {
-        indent = `\n${space.repeat(level)}`;
-        indentCache!.set(level, indent);
-      }
-    }
-
+  // indent 为本节点缩进串（根节点由 space 决定）。传缩进串而非层级：indent(level + 1)
+  // 恒等于 indent(level) + space，于是每节点只需一次 O(1) 拼接——既不需要 space.repeat(level)，
+  // 也就不需要缓存它。compact 模式下 space 为空串，拼接恒得空串，无需分支。
+  function stringify(parent: any, key: string, node: any, indent: string): string | undefined {
     if (node && typeof node.toJSON === 'function') {
       node = node.toJSON(key);
     }
@@ -170,28 +175,24 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
 
     if (typeof node !== 'object' || node === null) return JSON.stringify(node);
 
-    // 空容器恒输出紧凑括号（与原生 JSON.stringify 一致，即使 pretty-print 模式）
-    function groupOutput(out: string[], brackets: '[]' | '{}'): string {
-      return out.length === 0
-        ? brackets
-        : (brackets === '[]' ? '[' : '{') + out.join(',') + indent + (brackets === '[]' ? ']' : '}');
-    }
-
     if (seen.has(node)) {
       if (cycles) return JSON.stringify('__cycle__');
       throw new TypeError('Converting circular structure to JSON');
     }
+
+    // 子节点缩进 = 本层缩进 + 一级缩进；同一值同时用作成员的缩进前缀
+    const childIndent = indent + space;
 
     if (Array.isArray(node)) {
       seen.add(node);
       const out: string[] = [];
       for (let i = 0; i < node.length; i++) {
         // key 恒为字符串（对齐原生 JSON.stringify）：数组元素传索引字符串，而非数字
-        const item = stringify(node, String(i), node[i], level + 1);
-        out.push(indent + space + (item === undefined ? 'null' : item));
+        const item = stringify(node, String(i), node[i], childIndent);
+        out.push(childIndent + (item === undefined ? 'null' : item));
       }
       seen.delete(node);
-      return groupOutput(out, '[]');
+      return wrap(out, '[', ']', indent);
     }
 
     seen.add(node);
@@ -203,20 +204,21 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
     const out: string[] = [];
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      const value = stringify(node, key, node[key], level + 1);
+      const value = stringify(node, key, node[key], childIndent);
 
       if (value === undefined) continue;
 
       const keyValue = JSON.stringify(key) + colonSeparator + value;
-      out.push(indent + space + keyValue);
+      out.push(childIndent + keyValue);
     }
 
     seen.delete(node);
 
-    return groupOutput(out, '{}');
+    return wrap(out, '{', '}', indent);
   }
 
-  return stringify({ '': obj }, '', obj, 0);
+  // 根节点缩进：pretty-print 下首行换行，compact 下为空串（等价于原 level = 0 的缩进串）
+  return stringify({ '': obj }, '', obj, space ? '\n' : '');
 }
 
 export { stableStringify };
