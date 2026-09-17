@@ -59,35 +59,36 @@ interface ResolvedOptions {
 /** 恒等 replacer：未提供 replacer 时的默认值（模块级常量，免去每次调用重新分配） */
 const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
 
+/** Number 包装的槽检查：`Number.prototype.valueOf` 要求具备 [[NumberData]]，无槽即抛 TypeError */
+const boxedNumberSlot = (node: object): unknown => Number.prototype.valueOf.call(node);
+
+/** String 包装的槽检查：`String.prototype.valueOf` 要求具备 [[StringData]]，无槽即抛 TypeError */
+const boxedStringSlot = (node: object): unknown => String.prototype.valueOf.call(node);
+
+/** Boolean 包装的槽读取：`Boolean.prototype.valueOf` 要求具备 [[BooleanData]]，无槽即抛 TypeError */
+const boxedBooleanSlot = (node: object): unknown => Boolean.prototype.valueOf.call(node);
+
+/** BigInt 包装的槽读取：BigInt 无对应全局构造器，只能经 `BigInt.prototype.valueOf` 取值 */
+const boxedBigIntSlot = (node: object): unknown => BigInt.prototype.valueOf.call(node);
+
 /** Number 包装取值：按规范用 `ToNumber`（沿可覆写的 valueOf → toString 求值） */
 const boxedNumberValue = (node: object): unknown => Number(node);
 
 /** String 包装取值：按规范用 `ToString`（沿可覆写的 toString → valueOf 求值） */
 const boxedStringValue = (node: object): unknown => String(node);
 
-/** Boolean 包装：按规范直接读内部槽（原型方法要求具备该槽，无槽即抛 TypeError） */
-const boxedBooleanSlot = (node: object): unknown => Boolean.prototype.valueOf.call(node);
-
-/** BigInt 包装：按规范直接读内部槽；BigInt 无对应全局构造器，只能经 BigInt.prototype 取值 */
-const boxedBigIntSlot = (node: object): unknown => BigInt.prototype.valueOf.call(node);
-
-/** Number 包装的槽检查：`Number.prototype.valueOf` 要求具备 [[NumberData]]，无槽即抛 TypeError */
-const assertNumberSlot = (node: object): unknown => Number.prototype.valueOf.call(node);
-
-/** String 包装的槽检查：`String.prototype.valueOf` 要求具备 [[StringData]]，无槽即抛 TypeError */
-const assertStringSlot = (node: object): unknown => String.prototype.valueOf.call(node);
-
 /**
  * 装箱原始值标签 → { 槽检查, 取值 }。
  *
  * 取值按原生规范分两类：Number 用 `ToNumber`、String 用 `ToString`——二者都会沿可覆写的
- * `valueOf`/`toString` 求值；Boolean 与 BigInt 才是直接读内部槽。故四类不能统一用 `valueOf`。
+ * `valueOf`/`toString` 求值，故须在槽检查之后另取一次；Boolean 与 BigInt 则直接读内部槽、
+ * 槽值即最终值，因此不提供 `value`，由 `unbox` 复用槽检查的返回值（免去同一函数被调用两次）。
  */
-const BOXED_KINDS: Record<string, { slot: (node: object) => unknown; value: (node: object) => unknown }> = {
-  '[object Number]': { slot: assertNumberSlot, value: boxedNumberValue },
-  '[object String]': { slot: assertStringSlot, value: boxedStringValue },
-  '[object Boolean]': { slot: boxedBooleanSlot, value: boxedBooleanSlot },
-  '[object BigInt]': { slot: boxedBigIntSlot, value: boxedBigIntSlot },
+const BOXED_KINDS: Record<string, { slot: (node: object) => unknown; value?: (node: object) => unknown }> = {
+  '[object Number]': { slot: boxedNumberSlot, value: boxedNumberValue },
+  '[object String]': { slot: boxedStringSlot, value: boxedStringValue },
+  '[object Boolean]': { slot: boxedBooleanSlot },
+  '[object BigInt]': { slot: boxedBigIntSlot },
 };
 
 /**
@@ -114,15 +115,19 @@ function unbox(node: object): unknown {
   const kind = BOXED_KINDS[Object.prototype.toString.call(node)];
   if (!kind) return node;
 
+  let slotValue: unknown;
   try {
-    kind.slot(node);
+    slotValue = kind.slot(node);
   }
   catch {
     // 无对应内部槽 —— 标签来自伪造的 Symbol.toStringTag，按普通对象处理
     return node;
   }
 
-  return kind.value(node);
+  // Boolean / BigInt 的槽值即最终值；Number / String 需再按规范走 ToNumber / ToString。
+  // 取值刻意留在 try 之外：包装对象被改写的 valueOf/toString 抛错时应向调用方传播（与原生一致），
+  // 不能被上面的 catch 吞掉而误判为「标签伪造」
+  return kind.value ? kind.value(node) : slotValue;
 }
 
 /**
@@ -137,15 +142,13 @@ function unbox(node: object): unknown {
 function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): ResolvedOptions {
   const isObj = opts != null && typeof opts === 'object';
 
-  // 缩进对齐原生 JSON.stringify 语义：
-  // - 数字：ToIntegerOrInfinity 截断后钳制到 [0, 10]（负数/NaN → 无缩进；Infinity/超大值 → 10，
-  //   避免 strRepeat 无限循环与内存压力）
-  // - 字符串：仅取前 10 个码元
-  // - 其余类型（boolean 等）：原生按无缩进处理
+  // 归一规则见 StableStringifyOptions#space，此处只记两点「为什么」：
+  // - 数字先截断再钳到 [0, 10]：Infinity / 超大值若直接交给 repeat 会挂死或吃满内存
+  // - 装箱 Number / String 须先拆箱再归一——原生即按内部槽还原（Boolean 包装与其他对象不拆箱，
+  //   也即不缩进）；space 类型上是 string | number，装箱形态只可能来自未受类型约束的调用方，
+  //   故此处按 unknown 处理
   let space = '';
   if (isObj && opts.space !== undefined) {
-    // 原生先按内部槽拆箱装箱的 Number / String 再归一（Boolean 包装与其他对象不拆箱，即不缩进）。
-    // 类型上 space 是 string | number，装箱形态只可能来自未受类型约束的调用方，故此处按 unknown 处理
     const raw: unknown = opts.space;
     const value = typeof raw === 'object' && raw !== null ? unbox(raw) : raw;
     if (typeof value === 'number') {
@@ -170,12 +173,13 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
   const withGetter = cmpOpt ? cmpOpt.length > 2 : false;
   const cmp: NodeComparator | undefined = cmpOpt
     ? (node: Record<string, any>) => {
-        const get = withGetter ? (k: string) => node[k] : void 0;
+        // getter 每节点构造一次并复用：原先在比较器内部按需新建，等于每次比较都分配一个对象
+        const getter = withGetter ? { get: (k: string) => node[k] } : void 0;
         return (a: string, b: string) =>
           cmpOpt(
             { key: a, value: node[a] },
             { key: b, value: node[b] },
-            get ? { get } : void 0
+            getter
           );
       }
     : void 0;
@@ -260,9 +264,13 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
 
     if (typeof node !== 'object' || node === null) return JSON.stringify(node);
 
+    // 容器种类判定一次即可：unbox 对真包装对象一律返回原始值（被下一行 return 拦下），
+    // 否则原样返回同一对象，故该结果在后面的容器分派处依然成立
+    const isArray = Array.isArray(node);
+
     // 装箱原始值按内部槽拆箱（对齐原生：位于 replacer 之后、容器分派之前）。
     // 数组必非装箱对象，跳过判定以免为数组多付一次原型读取；拆箱可能还原为原始值，故需重判。
-    if (!Array.isArray(node)) {
+    if (!isArray) {
       node = unbox(node);
       if (typeof node !== 'object' || node === null) return JSON.stringify(node);
     }
@@ -282,7 +290,7 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
 
     let result: string;
 
-    if (Array.isArray(node)) {
+    if (isArray) {
       // 长度在循环前快照一次（对齐原生的 LengthOfArrayLike）：遍历期间对数组的读写不再改变迭代次数。
       // 同时把每轮的 length 属性读取降为一次
       const length = node.length;
