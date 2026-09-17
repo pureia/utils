@@ -409,10 +409,18 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
   // 分隔符仅由 space 决定，提升为调用级常量
   const colonSeparator = space ? ': ' : ':';
 
-  // indent 为本节点缩进串（根节点由 space 决定）。传缩进串而非层级：indent(level + 1)
-  // 恒等于 indent(level) + space，于是每节点只需一次 O(1) 拼接。compact 模式下 space 为空串，
-  // 拼接恒得空串，无需分支。
-  function stringify(parent: any, key: string, node: any, indent: string): string | undefined {
+  /**
+   * 第一相（Split Phase）：toJSON 与 replacer，决定这个 key 最终映射到什么值。
+   *
+   * 与拆箱分相，是因为原生规范里它们本也是先后两道（GetV(toJSON)、replacer 都排在装箱拆箱之前），
+   * 而拆箱会把对象还原成原始值——两相之间一旦设早退，叶子编码就必然在两处重复。
+   *
+   * @param parent - 父容器（同时作为 replacer 的 this）
+   * @param key - 本节点在父容器里的 key
+   * @param node - 原始值
+   * @returns 归一后的值；`undefined` 表示该属性被 replacer 跳过
+   */
+  function resolveReplacement(parent: any, key: string, node: any): any {
     // toJSON 只在 Object（含函数）与 BigInt 上查找——对齐原生规范：GetV 仅对这两类进行；
     // 属性只读取一次并以 call 显式绑定 this：accessor 形态的 toJSON 不会因二次读取被触发两遍。
     const nodeType = typeof node;
@@ -421,72 +429,80 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
       if (typeof toJSON === 'function') node = toJSON.call(node, key);
     }
 
-    node = replacer.call(parent, parent, key, node);
+    return replacer.call(parent, parent, key, node);
+  }
+
+  // indent 为本节点缩进串（根节点由 space 决定）。传缩进串而非层级：indent(level + 1)
+  // 恒等于 indent(level) + space，于是每节点只需一次 O(1) 拼接。compact 模式下 space 为空串，
+  // 拼接恒得空串，无需分支。
+  function stringify(parent: any, key: string, node: any, indent: string): string | undefined {
+    node = resolveReplacement(parent, key, node);
     if (node === undefined) return;
 
-    if (typeof node !== 'object' || node === null) return JSON.stringify(node);
+    // 第二相：只有「非 null 对象」需要装箱判定——数组必非装箱对象（跳过以免为数组多付一次原型读取），
+    // 原始值无从拆箱。拆箱可能把对象还原成原始值，故此处不早退：叶子编码只在函数末尾一处。
+    if (typeof node === 'object' && node !== null) {
+      // 容器种类判定一次即可：unbox 对真包装对象一律返回原始值（被下面那次重判拦下），
+      // 否则原样返回同一对象，故该结果在容器分派处依然成立
+      const isArray = Array.isArray(node);
+      if (!isArray) node = unbox(node);
 
-    // 容器种类判定一次即可：unbox 对真包装对象一律返回原始值（被下一行 return 拦下），
-    // 否则原样返回同一对象，故该结果在后面的容器分派处依然成立
-    const isArray = Array.isArray(node);
+      // 拆箱可能已把对象还原成原始值，此时落到函数末尾统一编码
+      if (typeof node === 'object' && node !== null) {
+        if (onPath.has(node)) {
+          if (cycles) return JSON.stringify('__cycle__');
+          throw new TypeError(circularMessage(onPath, pathKeys, node, parent, key));
+        }
 
-    // 装箱原始值按内部槽拆箱（对齐原生：位于 replacer 之后、容器分派之前）。
-    // 数组必非装箱对象，跳过判定以免为数组多付一次原型读取；拆箱可能还原为原始值，故需重判。
-    if (!isArray) {
-      node = unbox(node);
-      if (typeof node !== 'object' || node === null) return JSON.stringify(node);
-    }
+        // 子节点缩进 = 本层缩进 + 一级缩进；同一值同时用作成员的缩进前缀
+        const childIndent = indent + space;
 
-    if (onPath.has(node)) {
-      if (cycles) return JSON.stringify('__cycle__');
-      throw new TypeError(circularMessage(onPath, pathKeys, node, parent, key));
-    }
+        // 循环引用防护的进入-离开必须成对：进入点与离开点各只有一处，新增容器分支也不会遗漏配对的
+        // onPath.delete。不使用 try/finally：抛错会中止整个调用，而 onPath 是调用级状态，
+        // 故无需在异常路径上回滚。
+        onPath.add(node);
+        pathKeys.push(key);
 
-    // 子节点缩进 = 本层缩进 + 一级缩进；同一值同时用作成员的缩进前缀
-    const childIndent = indent + space;
+        let result: string;
 
-    // 循环引用防护的进入-离开必须成对：进入点与离开点各只有一处，新增容器分支也不会遗漏配对的
-    // onPath.delete。不使用 try/finally：抛错会中止整个调用，而 onPath 是调用级状态，
-    // 故无需在异常路径上回滚。
-    onPath.add(node);
-    pathKeys.push(key);
+        if (isArray) {
+          // 长度在循环前快照一次（对齐原生的 LengthOfArrayLike）：遍历期间对数组的读写不再改变迭代次数。
+          // 同时把每轮的 length 属性读取降为一次
+          const length = node.length;
+          const out: string[] = [];
+          for (let i = 0; i < length; i++) {
+            // key 恒为字符串（对齐原生 JSON.stringify）：数组元素传索引字符串，而非数字
+            const item = stringify(node, String(i), node[i], childIndent);
+            out.push(childIndent + (item === undefined ? 'null' : item));
+          }
+          result = wrap(out, BRACKETS.list, indent);
+        }
+        else {
+          const keys = Object.keys(node);
+          const comparer = cmp ? cmp(node) : void 0;
+          comparer ? keys.sort(comparer) : keys.sort();
 
-    let result: string;
+          const out: string[] = [];
+          for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            const value = stringify(node, key, node[key], childIndent);
 
-    if (isArray) {
-      // 长度在循环前快照一次（对齐原生的 LengthOfArrayLike）：遍历期间对数组的读写不再改变迭代次数。
-      // 同时把每轮的 length 属性读取降为一次
-      const length = node.length;
-      const out: string[] = [];
-      for (let i = 0; i < length; i++) {
-        // key 恒为字符串（对齐原生 JSON.stringify）：数组元素传索引字符串，而非数字
-        const item = stringify(node, String(i), node[i], childIndent);
-        out.push(childIndent + (item === undefined ? 'null' : item));
+            if (value === undefined) continue;
+
+            const keyValue = JSON.stringify(key) + colonSeparator + value;
+            out.push(childIndent + keyValue);
+          }
+
+          result = wrap(out, BRACKETS.map, indent);
+        }
+
+        onPath.delete(node);
+        pathKeys.pop();
+        return result;
       }
-      result = wrap(out, BRACKETS.list, indent);
-    }
-    else {
-      const keys = Object.keys(node);
-      const comparer = cmp ? cmp(node) : void 0;
-      comparer ? keys.sort(comparer) : keys.sort();
-
-      const out: string[] = [];
-      for (let i = 0; i < keys.length; i++) {
-        const key = keys[i];
-        const value = stringify(node, key, node[key], childIndent);
-
-        if (value === undefined) continue;
-
-        const keyValue = JSON.stringify(key) + colonSeparator + value;
-        out.push(childIndent + keyValue);
-      }
-
-      result = wrap(out, BRACKETS.map, indent);
     }
 
-    onPath.delete(node);
-    pathKeys.pop();
-    return result;
+    return JSON.stringify(node);
   }
 
   // 根节点缩进：pretty-print 下首行换行，compact 下为空串
