@@ -45,20 +45,6 @@ interface StableStringifyOptions {
   cycles?: boolean;
 }
 
-/** 按节点产出的键比较器：由 resolveOptions 将调用方 cmp 包装为「每个节点一个比较器」的形态 */
-type NodeComparator = (node: Record<string, any>) => (a: string, b: string) => number;
-
-/** 遍历期使用的内部规范化选项（不对外导出）：公共选项/重载经 resolveOptions 归一后的结果 */
-interface ResolvedOptions {
-  space: string;
-  cycles: boolean;
-  replacer: ReplacerFunc;
-  cmp?: NodeComparator;
-}
-
-/** 恒等 replacer：未提供 replacer 时的默认值（模块级常量，免去每次调用重新分配） */
-const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
-
 /**
  * 品牌判定原语：在模块加载时捕获——`Object` 与 `Object.prototype` 上的方法可被调用方改写，
  * 捕获后判定不受其影响（与下方槽检查方法同理）
@@ -66,64 +52,42 @@ const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
 const getPrototype = Object.getPrototypeOf;
 const objectToString = Object.prototype.toString;
 
-/** Number 包装的槽检查：`Number.prototype.valueOf` 要求具备 [[NumberData]]，无槽即抛 TypeError */
-const boxedNumberSlot = (node: object): unknown => Number.prototype.valueOf.call(node);
-
-/** String 包装的槽检查：`String.prototype.valueOf` 要求具备 [[StringData]]，无槽即抛 TypeError */
-const boxedStringSlot = (node: object): unknown => String.prototype.valueOf.call(node);
-
-/** Boolean 包装的槽读取：`Boolean.prototype.valueOf` 要求具备 [[BooleanData]]，无槽即抛 TypeError */
-const boxedBooleanSlot = (node: object): unknown => Boolean.prototype.valueOf.call(node);
-
-/** BigInt 包装的槽读取：BigInt 无对应全局构造器，只能经 `BigInt.prototype.valueOf` 取值 */
-const boxedBigIntSlot = (node: object): unknown => BigInt.prototype.valueOf.call(node);
-
-/** Number 包装取值：按规范用 `ToNumber`（沿可覆写的 valueOf → toString 求值） */
-const boxedNumberValue = (node: object): unknown => Number(node);
-
-/** String 包装取值：按规范用 `ToString`（沿可覆写的 toString → valueOf 求值） */
-const boxedStringValue = (node: object): unknown => String(node);
-
 /**
- * 装箱原始值标签 → { 槽检查, 取值 }。
+ * 装箱原始值的一类：标签、包装原型、槽检查，以及（规范要求另取时的）取值。
  *
  * 取值按原生规范分两类：Number 用 `ToNumber`、String 用 `ToString`——二者都会沿可覆写的
  * `valueOf`/`toString` 求值，故须在槽检查之后另取一次；Boolean 与 BigInt 则直接读内部槽、
- * 槽值即最终值，因此不提供 `value`，由 `unbox` 复用槽检查的返回值（免去同一函数被调用两次）。
+ * 槽值即最终值，因此不提供 `value`，由 `readSlotValue` 复用槽检查的返回值（免去同一函数被调用两次）。
  */
 interface BoxedKind {
+  /** `Object.prototype.toString` 在链上无 `Symbol.toStringTag` 时给出的标签（BigInt 的 `[object BigInt]` 来自其原型上的该属性，不是内置标签） */
+  label: string;
+  /** 对应包装原型：链上存在 `Symbol.toStringTag` 时据此挑候选（四类内部槽只能随对应包装原型进入原型链） */
+  proto: object;
   /** 槽检查：无对应内部槽时抛 TypeError（userland 唯一不可伪造的品牌检查） */
   slot: (node: object) => unknown;
   /** 取值：仅在规范要求「先查槽、再按 ToNumber/ToString 另取」时提供；Boolean/BigInt 的槽值即最终值 */
   value?: (node: object) => unknown;
 }
 
-const NUMBER_KIND: BoxedKind = { slot: boxedNumberSlot, value: boxedNumberValue };
-const STRING_KIND: BoxedKind = { slot: boxedStringSlot, value: boxedStringValue };
-const BOOLEAN_KIND: BoxedKind = { slot: boxedBooleanSlot };
-const BIGINT_KIND: BoxedKind = { slot: boxedBigIntSlot };
-
 /**
- * 标签 → 槽种类：只在链上不存在 `Symbol.toStringTag` 时用于挑候选——此时 `Object.prototype.toString`
+ * 四类装箱槽的**唯一清单**：标签表、原型表与固定探测顺序都由此派生，增删一类只动这一处。
+ *
+ * `label` 只在链上不存在 `Symbol.toStringTag` 时用于挑候选——此时 `Object.prototype.toString`
  * 的标签必然取自内部槽（规范：无该属性则回落到 builtinTag），既不可伪造，读取也不会触发用户代码。
  */
-const BOXED_KINDS: Record<string, BoxedKind> = {
-  '[object Number]': NUMBER_KIND,
-  '[object String]': STRING_KIND,
-  '[object Boolean]': BOOLEAN_KIND,
-  '[object BigInt]': BIGINT_KIND,
-};
+const BOXED_KINDS: readonly BoxedKind[] = [
+  { label: '[object Number]', proto: Number.prototype, slot: (node) => Number.prototype.valueOf.call(node), value: (node) => Number(node) },
+  { label: '[object String]', proto: String.prototype, slot: (node) => String.prototype.valueOf.call(node), value: (node) => String(node) },
+  { label: '[object Boolean]', proto: Boolean.prototype, slot: (node) => Boolean.prototype.valueOf.call(node) },
+  { label: '[object BigInt]', proto: BigInt.prototype, slot: (node) => BigInt.prototype.valueOf.call(node) },
+];
 
-/** 包装原型 → 槽种类：链上存在 `Symbol.toStringTag` 时改由原型链挑候选（四类内部槽只能随对应包装原型进入原型链） */
-const BOXED_BY_PROTO = new Map<object, BoxedKind>([
-  [Number.prototype, NUMBER_KIND],
-  [String.prototype, STRING_KIND],
-  [Boolean.prototype, BOOLEAN_KIND],
-  [BigInt.prototype, BIGINT_KIND],
-]);
+/** 标签 → 槽种类（链上无 `Symbol.toStringTag` 时挑候选用，见 `BoxedKind#label`） */
+const KIND_BY_LABEL = new Map<string, BoxedKind>(BOXED_KINDS.map((kind): [string, BoxedKind] => [kind.label, kind]));
 
-/** 四类槽种类的固定探测顺序：与 BOXED_BY_PROTO 同源，避免两处清单漂移 */
-const BOXED_KIND_LIST: readonly BoxedKind[] = [...BOXED_BY_PROTO.values()];
+/** 包装原型 → 槽种类（链上有 `Symbol.toStringTag` 时挑候选用，见 `BoxedKind#proto`） */
+const KIND_BY_PROTO = new Map<object, BoxedKind>(BOXED_KINDS.map((kind): [object, BoxedKind] => [kind.proto, kind]));
 
 /** 无对应内部槽的哨兵：四类槽的取值恒为原始值（Number/String 经 ToNumber/ToString、Boolean/BigInt 读槽），不可能等于它 */
 const NO_SLOT = Symbol('noSlot');
@@ -165,7 +129,7 @@ function readSlotValue(kind: BoxedKind, node: object): unknown {
 function kindByProtoChain(node: object): BoxedKind | undefined {
   let proto = getPrototype(node);
   while (proto !== null && proto !== Object.prototype) {
-    const kind = BOXED_BY_PROTO.get(proto);
+    const kind = KIND_BY_PROTO.get(proto);
     if (kind) return kind;
     proto = getPrototype(proto);
   }
@@ -188,8 +152,8 @@ function unboxByProtoChain(node: object): unknown {
   const hit = readSlotValue(hinted, node);
   if (hit !== NO_SLOT) return hit;
 
-  for (let i = 0; i < BOXED_KIND_LIST.length; i++) {
-    const kind = BOXED_KIND_LIST[i];
+  for (let i = 0; i < BOXED_KINDS.length; i++) {
+    const kind = BOXED_KINDS[i];
     if (kind === hinted) continue;
     const value = readSlotValue(kind, node);
     if (value !== NO_SLOT) return value;
@@ -236,7 +200,7 @@ function unbox(node: object): unknown {
 
   // 原型即某个包装原型：槽检查直接给答案，标签给不出别的结论（槽才是事实）。这也是装箱对象最常见的
   // 形态（含子类以外的全部同 realm 包装对象），故优先于标签判定，省掉一次标签读取
-  const byProto = BOXED_BY_PROTO.get(proto);
+  const byProto = KIND_BY_PROTO.get(proto);
   if (byProto) {
     const value = readSlotValue(byProto, node);
     if (value !== NO_SLOT) return value;
@@ -246,11 +210,46 @@ function unbox(node: object): unknown {
   // 链上无标签：Object.prototype.toString 的标签必出自内部槽（规范：无该属性则回落到 builtinTag），
   // 不可伪造，可直接用作候选；此路径不触发任何用户代码
   if (!(Symbol.toStringTag in node)) {
-    const kind = BOXED_KINDS[objectToString.call(node)];
+    const kind = KIND_BY_LABEL.get(objectToString.call(node));
     return kind ? readSlotValue(kind, node) : node;
   }
 
   return unboxByProtoChain(node);
+}
+
+/** 按节点产出的键比较器：由 resolveOptions 将调用方 cmp 包装为「每个节点一个比较器」的形态 */
+type NodeComparator = (node: Record<string, any>) => (a: string, b: string) => number;
+
+/** 遍历期使用的内部规范化选项（不对外导出）：公共选项/重载经 resolveOptions 归一后的结果 */
+interface ResolvedOptions {
+  space: string;
+  cycles: boolean;
+  replacer: ReplacerFunc;
+  cmp?: NodeComparator;
+}
+
+/** 恒等 replacer：未提供 replacer 时的默认值（模块级常量，免去每次调用重新分配） */
+const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
+
+/**
+ * 归一 `space`：产出每层之间的缩进串（无缩进时为空串）。
+ *
+ * 规则见 `StableStringifyOptions#space`，此处只记两点「为什么」：
+ * - 数字先截断再钳到 [0, 10]：Infinity / 超大值若直接交给 repeat 会挂死或吃满内存
+ * - 装箱 Number / String 须先拆箱再归一——原生即按内部槽还原（Boolean 包装与其他对象不拆箱，
+ *   也即不缩进）；`space` 类型上是 string | number，装箱形态只可能来自未受类型约束的调用方，
+ *   故入参按 unknown 处理
+ *
+ * @param raw - 调用方给出的 `space`（调用方保证非 undefined）
+ * @returns 缩进串
+ */
+function normalizeSpace(raw: unknown): string {
+  const value = typeof raw === 'object' && raw !== null ? unbox(raw) : raw;
+  if (typeof value === 'number') {
+    const n = Math.trunc(value);
+    return n >= 1 ? ' '.repeat(Math.min(10, n)) : '';
+  }
+  return typeof value === 'string' ? value.slice(0, 10) : '';
 }
 
 /**
@@ -265,34 +264,16 @@ function unbox(node: object): unknown {
 function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): ResolvedOptions {
   const isObj = opts != null && typeof opts === 'object';
 
-  // 归一规则见 StableStringifyOptions#space，此处只记两点「为什么」：
-  // - 数字先截断再钳到 [0, 10]：Infinity / 超大值若直接交给 repeat 会挂死或吃满内存
-  // - 装箱 Number / String 须先拆箱再归一——原生即按内部槽还原（Boolean 包装与其他对象不拆箱，
-  //   也即不缩进）；space 类型上是 string | number，装箱形态只可能来自未受类型约束的调用方，
-  //   故此处按 unknown 处理
-  let space = '';
-  if (isObj && opts.space !== undefined) {
-    const raw: unknown = opts.space;
-    const value = typeof raw === 'object' && raw !== null ? unbox(raw) : raw;
-    if (typeof value === 'number') {
-      const n = Math.trunc(value);
-      space = n >= 1 ? ' '.repeat(Math.min(10, n)) : '';
-    }
-    else if (typeof value === 'string') {
-      space = value.slice(0, 10);
-    }
-  }
+  const space = isObj && opts.space !== undefined ? normalizeSpace(opts.space) : '';
 
   const replacer = isObj && typeof opts.replacer === 'function' ? opts.replacer : identityReplacer;
 
-  // cmp 非函数时静默忽略（对齐原生忽略非函数 replacer 的姿态）：此前非函数真值会被直接当作
-  // 比较器使用，并在 sort 内部抛 "cmpOpt is not a function"——且只有存在 ≥2 个键的节点才会走到
-  // 排序，故表现为「多数输入正常、偶发抛错」这种难以归因的形态。
+  // cmp 非函数时静默忽略，姿态对齐原生忽略非函数 replacer
   const cmpOpt = typeof opts === 'function' ? opts : (isObj && typeof opts.cmp === 'function' ? opts.cmp : void 0);
   // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）与按 key 取值的
-  // getter。**getter 无条件注入**——原先按 `Function.length > 2` 嗅探调用方是否声明了第三个参数，
-  // 而第三参带默认值或 rest 时 length 停在 2，这类比较器会静默拿不到 getter 导致排序走偏；
-  // 两参比较器只是多收一个被忽略的实参。getter 每节点构造一次并复用（而非每次比较新建）。
+  // getter。**getter 无条件注入**——不按 `Function.length` 嗅探：第三参带默认值或 rest 时 length 停在 2，
+  // 嗅探会让这类比较器静默拿不到 getter；两参比较器只是多收一个被忽略的实参。
+  // getter 每节点构造一次并复用。
   const cmp: NodeComparator | undefined = cmpOpt
     ? (node: Record<string, any>) => {
         const getter = { get: (k: string) => node[k] };
@@ -361,11 +342,10 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
   const colonSeparator = space ? ': ' : ':';
 
   // indent 为本节点缩进串（根节点由 space 决定）。传缩进串而非层级：indent(level + 1)
-  // 恒等于 indent(level) + space，于是每节点只需一次 O(1) 拼接——既不需要 space.repeat(level)，
-  // 也就不需要缓存它。compact 模式下 space 为空串，拼接恒得空串，无需分支。
+  // 恒等于 indent(level) + space，于是每节点只需一次 O(1) 拼接。compact 模式下 space 为空串，
+  // 拼接恒得空串，无需分支。
   function stringify(parent: any, key: string, node: any, indent: string): string | undefined {
-    // toJSON 只在 Object（含函数）与 BigInt 上查找——对齐原生规范：GetV 仅对这两类进行。
-    // 真值原始值（字符串/数字/布尔）因此不再被查找；0n 与 1n 也不会再一查一不查。
+    // toJSON 只在 Object（含函数）与 BigInt 上查找——对齐原生规范：GetV 仅对这两类进行；
     // 属性只读取一次并以 call 显式绑定 this：accessor 形态的 toJSON 不会因二次读取被触发两遍。
     const nodeType = typeof node;
     if ((node !== null && (nodeType === 'object' || nodeType === 'function')) || nodeType === 'bigint') {
@@ -398,8 +378,8 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
     const childIndent = indent + space;
 
     // 循环引用防护的进入-离开必须成对：进入点与离开点各只有一处，新增容器分支也不会遗漏配对的
-    // seen.delete（原先两个分支各自 add/delete 一遍）。不使用 try/finally：抛错会中止整个调用，
-    // 而 seen 是调用级状态，故无需在异常路径上回滚。
+    // seen.delete。不使用 try/finally：抛错会中止整个调用，而 seen 是调用级状态，
+    // 故无需在异常路径上回滚。
     seen.add(node);
 
     let result: string;
@@ -439,7 +419,7 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
     return result;
   }
 
-  // 根节点缩进：pretty-print 下首行换行，compact 下为空串（等价于原 level = 0 的缩进串）
+  // 根节点缩进：pretty-print 下首行换行，compact 下为空串
   return stringify({ '': obj }, '', obj, space ? '\n' : '');
 }
 

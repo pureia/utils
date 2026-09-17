@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `createFetch`：get/post/put/delete 四个快捷方法改为 `shortcut` 工厂生成（消除四份重复与 4 处 `as` 断言；公共签名不变）
 - `createAsyncDedupe`：`started.then` 双分支提炼为 `cleanup`（语义等价；仍不可用 `.finally`——派生 promise 会以原 reason 拒绝产生 unhandledrejection）
 - CONTEXT.md 词表同步：「配置合并」补显式 undefined 语义、「拦截器返回值校验」补空串 key/有限 code、「code」补非数字状态码归一、「拦截器/业务错误」补平台回调异常数据、「去重」补拦截器链快照时机、「防抖」补非负 wait、「事件发射器」补 keys 快照
+- `stableStringify`：内部结构重构，**语义等价、输出逐字节不变**——四类装箱槽的清单由「6 个一次性命名函数（4 个槽检查 + 2 个取值）+ 4 个 `KIND` 常量 + 两张手写查找表」收敛为单张 row-per-kind 表 `BOXED_KINDS`（标签、包装原型、槽检查、取值同行声明），标签表 `KIND_BY_LABEL`、原型表 `KIND_BY_PROTO` 与兜底探测顺序全部由它派生，增删一类只动一处；`space` 归一从 `resolveOptions` 拆出为 `normalizeSpace`，后者只留「重载判别 + 三项归一」的编排；`NodeComparator` / `ResolvedOptions` / `identityReplacer` 下移到「选项归一」段，声明顺序与关注点一致（公共类型 → 装箱判定 → 选项归一 → 容器包裹 → 遍历）；注释中的变更史叙述（「此前 / 原先」等）移出，归本文件。**本轮不拆分文件**（装箱判定与遍历仍同处一文件）：拆分需在 `src/**` 下新增文件、多一份 dist 产物，本轮以「不改包产物与 API 面」为先，改在文件内分区与去重。验证：差分对照重构前实现 **4737 次比对 → 0 处不一致**——语料 = 2500 组定种生成的结构图（与 52 种选项形态叉乘，共 4520 例）+ 105 条逐条对着行为契约写的对抗语料 + 112 条自既有用例转录的输入；比对内容除返回值与异常（类型 + 消息）外，还含**可观察副作用**：属性读取次数、Proxy `has`/`get` 陷阱次数、cmp getter 的同一性、replacer 收到的 `(parent, key)` 序列。台架以两处故意改坏做过阳性对照（`space` 不再钳制到 10；属性读两次），均报红后撤回。核对中发现的一处正确性隐患——四个 `X.prototype.valueOf` 未随 `getPrototypeOf`/`toString` 一并在模块加载时捕获，改写后品牌检查可被伪造——按 Two Hats 未混入本次重构，另立 `.scratch/boxed-brand-capture/issues/01-valueof-capture-asymmetry.md`。`test` 271 条全绿、`test:coverage` 维持 100%（阈值 95%）、`lint` / `typecheck` / `build` / `publint` 全绿
 
 ### Removed
 
