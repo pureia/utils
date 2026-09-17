@@ -22,6 +22,11 @@ describe('stableStringify', () => {
     it('空对象应输出 {}', () => {
       expect(stableStringify({})).toBe('{}');
     });
+
+    it('整数类键不按数值优先排序（已记录差异，与原生不同）', () => {
+      // CONTEXT.md「稳定序列化」词条记录的差异：原生会把类数组整数键排在最前，此处统一按码元序
+      expect(stableStringify({ 10: 'x', 2: 'y', 0: 'z' })).toBe('{"0":"z","10":"x","2":"y"}');
+    });
   });
 
   describe('嵌套对象递归排序', () => {
@@ -59,6 +64,14 @@ describe('stableStringify', () => {
       const arr = [1, , 3];
       expect(stableStringify(arr)).toBe('[1,null,3]');
     });
+
+    it('数组中非有限数字应输出 null', () => {
+      expect(stableStringify([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])).toBe('[null,null,null]');
+    });
+
+    it('数组中混合原始值应正确序列化', () => {
+      expect(stableStringify([true, false, 42, 3.14, 'hello'])).toBe('[true,false,42,3.14,"hello"]');
+    });
   });
 
   describe('space 缩进', () => {
@@ -85,6 +98,10 @@ describe('stableStringify', () => {
     it('嵌套对象应逐级增加缩进', () => {
       const obj = { a: { b: 1 } };
       expect(stableStringify(obj, { space: 2 })).toBe('{\n  "a": {\n    "b": 1\n  }\n}');
+    });
+
+    it('数组元素与其中的嵌套对象应逐级缩进', () => {
+      expect(stableStringify([1, { z: 1, a: 2 }], { space: 2 })).toBe('[\n  1,\n  {\n    "a": 2,\n    "z": 1\n  }\n]');
     });
   });
 
@@ -340,65 +357,6 @@ describe('stableStringify', () => {
     });
   });
 
-  // 特性测试（characterization test）：把当前实现的逐字节输出钉死。
-  // 它不负责发现缺陷，而是为随后拆解 stableStringify 的过程提供「行为未变」的可执行证据
-  // ——否则该结论只能靠推理。全部期望值取自当前实现的实测输出。
-  describe('特性测试（逐字节钉住当前输出）', () => {
-    it('给定输入表应产出与当前实现完全一致的字符串', () => {
-      const requestConfig = () => ({
-        url: '/users',
-        host: 'https://api.example.com',
-        method: 'GET',
-        header: { 'Content-Type': 'application/json' },
-        timeout: 10000,
-        isDedup: false,
-      });
-
-      // eslint-disable-next-line no-sparse-arrays
-      const sparse = [1, , 3];
-
-      const cases: Array<{ label: string; run: () => string | undefined; expected: string | undefined }> = [
-        { label: '对象按键排序', run: () => stableStringify({ c: 3, a: 1, b: 2 }), expected: '{"a":1,"b":2,"c":3}' },
-        { label: '大写在小写前', run: () => stableStringify({ a: 1, Z: 2 }), expected: '{"Z":2,"a":1}' },
-        { label: '整数类键按码元序（已记录差异）', run: () => stableStringify({ 10: 'x', 2: 'y', 0: 'z' }), expected: '{"0":"z","10":"x","2":"y"}' },
-        { label: '空对象', run: () => stableStringify({}), expected: '{}' },
-        { label: '空数组', run: () => stableStringify([]), expected: '[]' },
-        { label: '多层嵌套', run: () => stableStringify({ c: { d: { e: 1, a: 2 } }, a: 3 }), expected: '{"a":3,"c":{"d":{"a":2,"e":1}}}' },
-        { label: '数组保持索引序', run: () => stableStringify([3, 1, 2]), expected: '[3,1,2]' },
-        { label: '数组元素递归排序', run: () => stableStringify([{ c: 1, a: 2 }, { z: 3, b: 4 }]), expected: '[{"a":2,"c":1},{"b":4,"z":3}]' },
-        { label: '数组 undefined 元素', run: () => stableStringify([1, undefined, 3]), expected: '[1,null,3]' },
-        { label: '稀疏数组', run: () => stableStringify(sparse), expected: '[1,null,3]' },
-        { label: '非有限数字', run: () => stableStringify([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]), expected: '[null,null,null]' },
-        { label: '原始值混合', run: () => stableStringify([true, false, 42, 3.14, 'hello']), expected: '[true,false,42,3.14,"hello"]' },
-        { label: '顶层 undefined', run: () => stableStringify(undefined), expected: undefined },
-        { label: '顶层 null', run: () => stableStringify(null), expected: 'null' },
-        { label: '对象属性 undefined 跳过', run: () => stableStringify({ a: 1, b: undefined }), expected: '{"a":1}' },
-        { label: 'space 2', run: () => stableStringify({ a: 1, b: 2 }, { space: 2 }), expected: '{\n  "a": 1,\n  "b": 2\n}' },
-        { label: 'space 制表符', run: () => stableStringify({ a: 1 }, { space: '\t' }), expected: '{\n\t"a": 1\n}' },
-        { label: 'space 2 嵌套', run: () => stableStringify({ a: { b: 1 } }, { space: 2 }), expected: '{\n  "a": {\n    "b": 1\n  }\n}' },
-        { label: 'space 2 空容器紧凑', run: () => stableStringify({ a: {}, b: [] }, { space: 2 }), expected: '{\n  "a": {},\n  "b": []\n}' },
-        { label: 'space 2 数组含对象', run: () => stableStringify([1, { z: 1, a: 2 }], { space: 2 }), expected: '[\n  1,\n  {\n    "a": 2,\n    "z": 1\n  }\n]' },
-        { label: 'space 0', run: () => stableStringify({ a: 1 }, { space: 0 }), expected: '{"a":1}' },
-        { label: 'space 负数', run: () => stableStringify({ a: 1 }, { space: -1 }), expected: '{"a":1}' },
-        { label: 'space Infinity 钳到 10', run: () => stableStringify({ a: 1 }, { space: Number.POSITIVE_INFINITY }), expected: '{\n          "a": 1\n}' },
-        { label: 'space NaN', run: () => stableStringify({ a: 1 }, { space: Number.NaN }), expected: '{"a":1}' },
-        { label: 'space 超长字符串截 10', run: () => stableStringify({ a: 1 }, { space: 'x'.repeat(20) }), expected: '{\nxxxxxxxxxx"a": 1\n}' },
-        { label: 'replacer 过滤 key', run: () => stableStringify({ a: 1, b: 2, c: 3 }, { replacer: (_parent: any, key: string, value: any) => (key === 'b' ? undefined : value) }), expected: '{"a":1,"c":3}' },
-        { label: 'replacer 改值', run: () => stableStringify({ a: 1, b: 2 }, { replacer: (_parent: any, _key: string, value: any) => (typeof value === 'number' ? value * 2 : value) }), expected: '{"a":2,"b":4}' },
-        { label: 'toJSON 自动调用', run: () => stableStringify({ a: 1, b: { value: 42, toJSON() { return this.value; } } }), expected: '{"a":1,"b":42}' },
-        { label: 'cycles 标记', run: () => { const cyclic: Record<string, any> = { a: 1 }; cyclic.self = cyclic; return stableStringify(cyclic, { cycles: true }); }, expected: '{"a":1,"self":"__cycle__"}' },
-        { label: 'cmp 按 value 降序', run: () => stableStringify({ a: 1, b: 2, c: 3 }, { cmp: (x: any, y: any) => y.value - x.value }), expected: '{"c":3,"b":2,"a":1}' },
-        { label: 'cmp 三参 getter', run: () => stableStringify({ a: 1, b: 2, c: 3 }, { cmp: (x: any, y: any, getter: any) => (getter ? getter.get(y.key) - getter.get(x.key) : 0) }), expected: '{"c":3,"b":2,"a":1}' },
-        { label: '仿请求配置对象（去重键输入）', run: () => stableStringify(requestConfig()), expected: '{"header":{"Content-Type":"application/json"},"host":"https://api.example.com","isDedup":false,"method":"GET","timeout":10000,"url":"/users"}' },
-        { label: '仿请求配置对象 space 2', run: () => stableStringify(requestConfig(), { space: 2 }), expected: '{\n  "header": {\n    "Content-Type": "application/json"\n  },\n  "host": "https://api.example.com",\n  "isDedup": false,\n  "method": "GET",\n  "timeout": 10000,\n  "url": "/users"\n}' },
-      ];
-
-      for (const { label, run, expected } of cases) {
-        expect(run(), label).toBe(expected);
-      }
-    });
-  });
-
   // 本组用例专门验证「装箱原始值」，必须真正构造包装对象。no-new-wrappers 与
   // unicorn/new-for-builtins 拦截的正是这类构造，其本意是防误用；此处属有意为之，
   // 故在块级关闭这两条规则（与文件内 no-sparse-arrays 的既有处置方式一致）
@@ -586,6 +544,24 @@ describe('stableStringify', () => {
     it('合法 cmp 不受影响（两参与三参仍生效）', () => {
       expect(stableStringify({ b: 1, a: 2 }, (x: any, y: any) => y.value - x.value)).toBe('{"a":2,"b":1}');
       expect(stableStringify({ b: 1, a: 2 }, { cmp: (x: any, y: any, g: any) => (g ? g.get(y.key) - g.get(x.key) : 0) })).toBe('{"a":2,"b":1}');
+    });
+  });
+
+  describe('仿请求配置对象的输出稳定（createFetch 去重键输入）', () => {
+    // createFetch 以 stableStringify(全量合并配置) 的哈希作为去重键，
+    // 故这一形状的输出必须逐字节稳定——改动它等于静默换掉请求的去重分组
+    const requestConfig = () => ({
+      url: '/users',
+      host: 'https://api.example.com',
+      method: 'GET',
+      header: { 'Content-Type': 'application/json' },
+      timeout: 10000,
+      isDedup: false,
+    });
+
+    it('紧凑模式与 space 2 下均产出预期字符串', () => {
+      expect(stableStringify(requestConfig())).toBe('{"header":{"Content-Type":"application/json"},"host":"https://api.example.com","isDedup":false,"method":"GET","timeout":10000,"url":"/users"}');
+      expect(stableStringify(requestConfig(), { space: 2 })).toBe('{\n  "header": {\n    "Content-Type": "application/json"\n  },\n  "host": "https://api.example.com",\n  "isDedup": false,\n  "method": "GET",\n  "timeout": 10000,\n  "url": "/users"\n}');
     });
   });
 });
