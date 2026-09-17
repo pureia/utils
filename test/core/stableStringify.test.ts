@@ -530,4 +530,27 @@ describe('stableStringify', () => {
       })).toBe('[1,2]');
     });
   });
+
+  describe('非函数 cmp 静默忽略（对齐原生忽略非函数 replacer 的姿态）', () => {
+    // 非函数 cmp 此前会在 sort 比较器内部抛 "cmpOpt is not a function"，
+    // 且只有存在 ≥2 个键的节点才会走到排序，故此处一律用双键对象暴露
+    it('cmp 为非函数真值时按未提供处理', () => {
+      const obj = () => ({ b: 2, a: 1 });
+      expect(stableStringify(obj(), { cmp: 5 as any })).toBe('{"a":1,"b":2}');
+      expect(stableStringify(obj(), { cmp: 'x' as any })).toBe('{"a":1,"b":2}');
+      expect(stableStringify(obj(), { cmp: true as any })).toBe('{"a":1,"b":2}');
+      expect(stableStringify(obj(), { cmp: {} as any })).toBe('{"a":1,"b":2}');
+      expect(stableStringify(obj(), { cmp: [] as any })).toBe('{"a":1,"b":2}');
+    });
+
+    it('第二个参数为非函数非对象时同样按未提供处理', () => {
+      expect(stableStringify({ b: 2, a: 1 }, 'x' as any)).toBe('{"a":1,"b":2}');
+      expect(stableStringify({ b: 2, a: 1 }, 5 as any)).toBe('{"a":1,"b":2}');
+    });
+
+    it('合法 cmp 不受影响（两参与三参仍生效）', () => {
+      expect(stableStringify({ b: 1, a: 2 }, (x: any, y: any) => y.value - x.value)).toBe('{"a":2,"b":1}');
+      expect(stableStringify({ b: 1, a: 2 }, { cmp: (x: any, y: any, g: any) => (g ? g.get(y.key) - g.get(x.key) : 0) })).toBe('{"a":2,"b":1}');
+    });
+  });
 });

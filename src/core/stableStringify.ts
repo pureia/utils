@@ -126,7 +126,10 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
 
   const replacer = isObj && typeof opts.replacer === 'function' ? opts.replacer : identityReplacer;
 
-  const cmpOpt = typeof opts === 'function' ? opts : (isObj ? opts.cmp : void 0);
+  // cmp 非函数时静默忽略（对齐原生忽略非函数 replacer 的姿态）：此前非函数真值会被直接当作
+  // 比较器使用，并在 sort 内部抛 "cmpOpt is not a function"——且只有存在 ≥2 个键的节点才会走到
+  // 排序，故表现为「多数输入正常、偶发抛错」这种难以归因的形态。
+  const cmpOpt = typeof opts === 'function' ? opts : (isObj && typeof opts.cmp === 'function' ? opts.cmp : void 0);
   // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）；
   // 仅当调用方 cmp 声明了第三个参数（按 key 取值函数）时才注入 getter，
   // 与原始 json-stable-stringify 的调用约定保持一致。

@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `stableStringify`：非函数 `cmp`（如 `{ cmp: 5 }`）不再抛错，按「未提供」处理——此前会被直接当作比较器，在 `sort` 内部抛 `cmpOpt is not a function`，且只有存在 ≥2 个键的节点才会走到排序，表现为「多数输入正常、偶发抛错」；姿态对齐原生忽略非函数 replacer
 - `stableStringify`：数组长度在遍历前快照一次（对齐原生的 `LengthOfArrayLike`）——此前每轮重读 `node.length`，replacer 于遍历期间增删数组元素会改变迭代次数与输出：追加元素多产出（`[1,2,3]`，原生 `[1,2]`）、截断则少产出且不补 `null`（`[1]`，原生 `[1,null,null]`）、拉长会产出新增下标（`[1,2,null,null,null,9]`，原生 `[1,2]`）；顺带把每轮的 `length` 属性读取降为一次
 - `stableStringify`：`toJSON` 查找语义对齐原生——此前该属性被读取两次（accessor 形态的 `toJSON` 被触发两遍，第二次读取抛错时会把该异常抛给调用方；原生只读一次）；且在真值原始值（字符串/数字/布尔）上也会被查找（原生仅对 Object 与 BigInt 查找，函数仍属 Object 故保留，需原型污染才可触发）；同时修正 BigInt 原始值的不一致——此前 `1n` 查找而 `0n`（假值）被跳过并落到 `JSON.stringify(0n)`，两条路径收到的属性 key 不同
 - `stableStringify`：装箱原始值按内部槽拆箱——此前静默产出错值：`new Number(3)` → `{}`（原生 `3`）、`new String('ab')` → `{"0":"a","1":"b"}`（原生 `"ab"`）、`new Boolean(false)` → `{}`（原生 `false`）、`Object(5n)` → `{}`（原生抛 `TypeError`），带自有属性的包装对象同样按内部槽处理；`space` 传装箱 Number/String（如 `new Number(2)`）此前不缩进，现按拆箱后的值归一。拆箱先经原型快路径筛选（原型为 `Object.prototype`/`Array.prototype`/`null` 者直接返回），故数组不付代价、普通对象图仅多一次原型读取；实测相对修复前：普通对象图 +2.1%、类实例图 +4.4%、原始值大数组 +0.1%。**不影响去重语义**——仅装箱输入的输出改变，且「相同配置恒产出相同键」的确定性对全部输入保持
