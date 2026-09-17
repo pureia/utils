@@ -1,26 +1,3 @@
-/**
- * 移植声明：本文件基于 json-stable-stringify（https://github.com/ljharb/json-stable-stringify）
- * 的 TypeScript 重写与改造。
- *
- * Original license (MIT):
- * Copyright (c) 2013 James Halliday
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
-
 /** 自定义 key 排序比较函数：接收 `{ key, value }` 对；第三个参数恒被传入按 key 取值的 getter（类型上仍标为可选，以便两参比较器直接赋值），返回负数/0/正数决定排序 */
 type CmpFunc = (
   a: { key: string; value: any },
