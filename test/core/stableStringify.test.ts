@@ -14,7 +14,7 @@ describe('stableStringify', () => {
       expect(stableStringify(obj1)).toBe(stableStringify(obj2));
     });
 
-    it('大写字母应排在小写字母前（UTF-16 码点序）', () => {
+    it('大写字母应排在小写字母前（UTF-16 码元序）', () => {
       const obj = { a: 1, Z: 2 };
       expect(stableStringify(obj)).toBe('{"Z":2,"a":1}');
     });
