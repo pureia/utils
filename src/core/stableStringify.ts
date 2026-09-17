@@ -35,7 +35,7 @@ type ReplacerFunc = (this: any, parent: any, key: string, value: any) => any;
  * `stableStringify` 选项；未提供的字段按原生 `JSON.stringify` 的默认语义处理。
  */
 interface StableStringifyOptions {
-  /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元；装箱 Number/String 按拆箱后的值处理 */
+  /** 缩进，对齐原生 JSON.stringify：数字截断并钳制到 [0, 10]（负数/NaN 视为无缩进），字符串仅取前 10 个码元，装箱 Number/String 按拆箱后的值处理，其余类型（boolean/对象等）按无缩进 */
   space?: string | number;
   /** 自定义 key 排序比较函数；也可直接传比较函数作为第二个参数 */
   cmp?: CmpFunc;
@@ -84,7 +84,14 @@ const boxedStringValue = (node: object): unknown => String(node);
  * `valueOf`/`toString` 求值，故须在槽检查之后另取一次；Boolean 与 BigInt 则直接读内部槽、
  * 槽值即最终值，因此不提供 `value`，由 `unbox` 复用槽检查的返回值（免去同一函数被调用两次）。
  */
-const BOXED_KINDS: Record<string, { slot: (node: object) => unknown; value?: (node: object) => unknown }> = {
+interface BoxedKind {
+  /** 槽检查：无对应内部槽时抛 TypeError（userland 唯一不可伪造的品牌检查） */
+  slot: (node: object) => unknown;
+  /** 取值：仅在规范要求「先查槽、再按 ToNumber/ToString 另取」时提供；Boolean/BigInt 的槽值即最终值 */
+  value?: (node: object) => unknown;
+}
+
+const BOXED_KINDS: Record<string, BoxedKind> = {
   '[object Number]': { slot: boxedNumberSlot, value: boxedNumberValue },
   '[object String]': { slot: boxedStringSlot, value: boxedStringValue },
   '[object Boolean]': { slot: boxedBooleanSlot },
@@ -99,6 +106,11 @@ const BOXED_KINDS: Record<string, { slot: (node: object) => unknown; value?: (no
  * 抛 `TypeError`，这是 userland 唯一不可伪造的品牌检查。用 `Object.prototype.toString` 而非
  * `instanceof`，则是因为后者跨 realm 失效。
  *
+ * **标签读取与槽检查同处一个 try**：`Symbol.toStringTag` 的 getter 自身可能抛错，而原生根本不读
+ * 该属性，故这一阶段的抛错一律按「非装箱对象」处理（否则一个抛错的 tag getter 会让本函数抛给
+ * 调用方，而原生能正常序列化）。**取值（`kind.value`）刻意留在 try 之外**：包装对象被改写的
+ * `valueOf`/`toString` 抛错时应向调用方传播（与原生一致），不能被这里的 catch 吞掉。
+ *
  * 先做一次廉价原型筛选：原型为 `Object.prototype` / `Array.prototype` / `null` 者按常规对象
  * 处理、直接返回——普通对象图与数组因而只多一次原型读取。
  *
@@ -112,21 +124,21 @@ function unbox(node: object): unknown {
   const proto = Object.getPrototypeOf(node);
   if (proto === Object.prototype || proto === Array.prototype || proto === null) return node;
 
-  const kind = BOXED_KINDS[Object.prototype.toString.call(node)];
-  if (!kind) return node;
-
+  let kind: BoxedKind | undefined;
   let slotValue: unknown;
   try {
-    slotValue = kind.slot(node);
+    // 标签读取与槽检查同处一个 try：tag getter 抛错与「无内部槽」都按非装箱对象处理
+    kind = BOXED_KINDS[Object.prototype.toString.call(node)];
+    if (kind) slotValue = kind.slot(node);
   }
   catch {
-    // 无对应内部槽 —— 标签来自伪造的 Symbol.toStringTag，按普通对象处理
+    // tag getter 抛错，或对象没有对应内部槽（槽检查抛 TypeError）——两种情况都按普通对象处理
     return node;
   }
 
-  // Boolean / BigInt 的槽值即最终值；Number / String 需再按规范走 ToNumber / ToString。
-  // 取值刻意留在 try 之外：包装对象被改写的 valueOf/toString 抛错时应向调用方传播（与原生一致），
-  // 不能被上面的 catch 吞掉而误判为「标签伪造」
+  if (!kind) return node;
+
+  // 取值留在 try 之外：包装对象改写的 valueOf/toString 抛错应向调用方传播（与原生一致）
   return kind.value ? kind.value(node) : slotValue;
 }
 

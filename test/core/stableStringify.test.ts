@@ -418,6 +418,25 @@ describe('stableStringify', () => {
       expect(stableStringify(value)).toBe(JSON.stringify(value));
     });
 
+    it('tag getter 抛错的对象按普通对象序列化（原生不读该属性，故不抛错）', () => {
+      class TagThrower {
+        get [Symbol.toStringTag]() { throw new Error('tag getter boom'); }
+      }
+      const value = { a: new TagThrower() };
+      expect(stableStringify(value)).toBe('{"a":{}}');
+      expect(stableStringify(value)).toBe(JSON.stringify(value));
+    });
+
+    it('包装对象取值抛错时异常向调用方传播（不被槽检查的 catch 吞掉）', () => {
+      const native: any = new Number(3);
+      native.valueOf = () => { throw new Error('valueOf boom'); };
+      expect(() => JSON.stringify(native)).toThrow('valueOf boom');
+
+      const mine: any = new Number(3);
+      mine.valueOf = () => { throw new Error('valueOf boom'); };
+      expect(() => stableStringify(mine)).toThrow('valueOf boom');
+    });
+
     it('space 传装箱 Boolean 或其他对象时不缩进（原生仅拆箱 Number / String）', () => {
       expect(stableStringify({ a: 1 }, { space: new Boolean(true) as any })).toBe('{"a":1}');
       expect(stableStringify({ a: 1 }, { space: new Boolean(true) as any })).toBe(JSON.stringify({ a: 1 }, null, new Boolean(true) as any));

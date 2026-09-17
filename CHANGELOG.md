@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `stableStringify`：三参 `cmp` 收到的 getter 对象由「每次比较新建」改为「每节点复用同一对象」（去掉每次比较的一次对象分配）；仅对以 `===` 比较该参数的程序可观察，返回值与调用约定不变
-- `stableStringify`：内部结构重构，**语义等价、输出逐字节不变**——选项归一化（重载判别、`space` 归一、`cmp` 包装）提炼为独立的 Split Phase 函数 `resolveOptions`；缩进由「传层级 + 缓存 `space.repeat(level)`」改为「直接传缩进串」（依据恒等式 `indent(level + 1) ≡ indent(level) + space`），缩进缓存随之失去存在理由而移除；容器包裹提炼为模块级纯函数 `wrap` 并直接收括号字面量（不再按 `'[]' | '{}'` 标签二次解码）；循环引用防护的 `seen.add`/`seen.delete` 由两个容器分支各写一遍收敛为单点（不使用 `try/finally`：抛错中止整个调用，`seen` 为调用级状态）。配套新增逐字节特性测试（33 组输入表）作为「行为未变」的可执行护栏。验证：差分对照重构前实现 24187 次比对 → 0 处不一致；微基准同进程交替测量取中位数——深嵌套 depth=200 持平（-0.6%，区间重叠）、宽对象 5000 键 -6.1%、大数组 10000 项 -4.8%
+- `stableStringify`：内部结构重构，**语义等价、输出逐字节不变**——选项归一化（重载判别、`space` 归一、`cmp` 包装）提炼为独立的 Split Phase 函数 `resolveOptions`；缩进由「传层级 + 缓存 `space.repeat(level)`」改为「直接传缩进串」（依据恒等式 `indent(level + 1) ≡ indent(level) + space`），缩进缓存随之失去存在理由而移除；容器包裹提炼为模块级纯函数 `wrap` 并直接收括号字面量（不再按 `'[]' | '{}'` 标签二次解码）；循环引用防护的 `seen.add`/`seen.delete` 由两个容器分支各写一遍收敛为单点（不使用 `try/finally`：抛错中止整个调用，`seen` 为调用级状态）。重构期间以 33 组逐字节特性测试作为「行为未变」的可执行护栏；该表在差分对照确认后撤除，其中 6 条有增量的行转为独立用例（见 Docs）。验证：差分对照重构前实现 24187 次比对 → 0 处不一致；微基准同进程交替测量取中位数——深嵌套 depth=200 持平（-0.6%，区间重叠）、宽对象 5000 键 -6.1%、大数组 10000 项 -4.8%
 
 - `debounce`：`options.immediate?: boolean` 更名为 `options.edge?: 'leading' | 'trailing'`，默认由 leading 改为 **trailing**（对齐主流防抖惯例；破坏性签名调整，0.x 未使用阶段）。leading 语义（首次立即执行、等待期合并、`flush` 补发最后一次）与 `wait` 非负校验不变
 - `createCancelable`/`createAsyncDedupe`：`asyncFunc` 契约放宽——返回值经 `Promise.resolve` 归一，原生 Promise、thenable、同步值均可（此前仅支持原生 Promise，同步返回值/thenable/跨 realm Promise 以 `TypeError` 拒绝；破坏性行为调整，0.x 未使用阶段），同步抛错仍以原始错误拒绝
@@ -65,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 
+- 测试：`stableStringify` 撤除重构期使用的逐字节特性测试表（33 行，其中约 27 行与既有独立用例重复——而既有用例本就使用精确字符串断言，逐字节钉住早已覆盖），保留 6 条真正有增量的行并按其归属转为独立用例；测试标题「UTF-16 码点序」修正为「码元序」
 - `stableStringify`：文件注释与 CONTEXT.md「稳定序列化」词条中的键排序措辞由「UTF-16 码点」修正为「UTF-16 码元」（`Array.prototype.sort` 默认比较码元，两者仅在星号代理对等场景有别）
 - README：新增「请求去重的语义边界」（去重键 = 拦截器前全量配置序列化、等待者不执行拦截器链）、「失败类别速查表」、ESM-only 说明；修正 `lint:fix` 脚本说明
 - CONTEXT.md「取消执行」词条同步 `isCompleted` 谓词语义
