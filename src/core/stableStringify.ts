@@ -183,20 +183,27 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
   return { space, cycles: isObj && opts.cycles === true, replacer, cmp };
 }
 
+/** 容器括号对：以成对常量提供，使「开闭括号配错」在调用点不可表达 */
+const BRACKETS: Record<'list' | 'map', readonly [string, string]> = {
+  list: ['[', ']'],
+  map: ['{', '}'],
+};
+
 /**
  * 包裹已序列化的成员，产出容器字面量。
  *
  * 空容器恒输出紧凑括号（与原生 `JSON.stringify` 一致，即使 pretty-print 模式）；
- * 否则逐项以逗号连接、以本层缩进收尾。`open`/`close` 直接收字面量括号，
- * 免去按 `'[]' | '{}'` 标签二次解码同一判别。
+ * 否则逐项以逗号连接、以本层缩进收尾。括号成对传入，既免去按 `'[]' | '{}'` 标签二次解码
+ * 同一判别，又保留标签原本自带的「开闭括号不可配错」约束。
  *
  * @param out - 已各自带缩进前缀的成员字符串
- * @param open - 开括号字面量
- * @param close - 闭括号字面量
+ * @param brackets - 成对的 [开括号, 闭括号]
  * @param indent - 本层缩进（仅非空容器使用）
  */
-function wrap(out: string[], open: string, close: string, indent: string): string {
-  return out.length === 0 ? open + close : open + out.join(',') + indent + close;
+function wrap(out: string[], brackets: readonly [string, string], indent: string): string {
+  return out.length === 0
+    ? brackets[0] + brackets[1]
+    : brackets[0] + out.join(',') + indent + brackets[1];
 }
 
 /**
@@ -285,7 +292,7 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
         const item = stringify(node, String(i), node[i], childIndent);
         out.push(childIndent + (item === undefined ? 'null' : item));
       }
-      result = wrap(out, '[', ']', indent);
+      result = wrap(out, BRACKETS.list, indent);
     }
     else {
       const keys = Object.keys(node);
@@ -303,7 +310,7 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
         out.push(childIndent + keyValue);
       }
 
-      result = wrap(out, '{', '}', indent);
+      result = wrap(out, BRACKETS.map, indent);
     }
 
     seen.delete(node);
