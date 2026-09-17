@@ -304,6 +304,32 @@ function wrap(out: string[], brackets: readonly [string, string], indent: string
   return out.length === 0 ? brackets[0] + brackets[1] : brackets[0] + out.join(',') + indent + brackets[1];
 }
 
+/**
+ * 第一相（Split Phase）：toJSON 与 replacer，决定这个 key 最终映射到什么值。
+ *
+ * 与拆箱分相，是因为原生规范里它们本也是先后两道（GetV(toJSON)、replacer 都排在装箱拆箱之前），
+ * 而拆箱会把对象还原成原始值——两相之间一旦设早退，叶子编码就必然在两处重复。
+ *
+ * 本函数只依赖入参：`replacer` 显式传入，不再隐式捕获调用级状态。
+ *
+ * @param replacer - 归一后的 replacer（`resolveOptions` 保证恒为函数）
+ * @param parent - 父容器（同时作为 replacer 的 this）
+ * @param key - 本节点在父容器里的 key
+ * @param node - 原始值
+ * @returns 归一后的值；`undefined` 表示该属性被 replacer 跳过
+ */
+function resolveReplacement(replacer: ReplacerFunc, parent: any, key: string, node: any): any {
+  // toJSON 只在 Object（含函数）与 BigInt 上查找——对齐原生规范：GetV 仅对这两类进行；
+  // 属性只读取一次并以 call 显式绑定 this：accessor 形态的 toJSON 不会因二次读取被触发两遍。
+  const nodeType = typeof node;
+  if ((node !== null && (nodeType === 'object' || nodeType === 'function')) || nodeType === 'bigint') {
+    const toJSON = node.toJSON;
+    if (typeof toJSON === 'function') node = toJSON.call(node, key);
+  }
+
+  return replacer.call(parent, parent, key, node);
+}
+
 /** 本层边在报错文本里的写法：数组元素为 `index N`，对象属性为 `property 'k'`，空串键记作 `<anonymous>` */
 function edgeLabel(from: object, key: string): string {
   return Array.isArray(from) ? `index ${key}` : key === '' ? '<anonymous>' : `property '${key}'`;
@@ -414,34 +440,11 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
   // 分隔符仅由 space 决定，提升为调用级常量
   const colonSeparator = space ? ': ' : ':';
 
-  /**
-   * 第一相（Split Phase）：toJSON 与 replacer，决定这个 key 最终映射到什么值。
-   *
-   * 与拆箱分相，是因为原生规范里它们本也是先后两道（GetV(toJSON)、replacer 都排在装箱拆箱之前），
-   * 而拆箱会把对象还原成原始值——两相之间一旦设早退，叶子编码就必然在两处重复。
-   *
-   * @param parent - 父容器（同时作为 replacer 的 this）
-   * @param key - 本节点在父容器里的 key
-   * @param node - 原始值
-   * @returns 归一后的值；`undefined` 表示该属性被 replacer 跳过
-   */
-  function resolveReplacement(parent: any, key: string, node: any): any {
-    // toJSON 只在 Object（含函数）与 BigInt 上查找——对齐原生规范：GetV 仅对这两类进行；
-    // 属性只读取一次并以 call 显式绑定 this：accessor 形态的 toJSON 不会因二次读取被触发两遍。
-    const nodeType = typeof node;
-    if ((node !== null && (nodeType === 'object' || nodeType === 'function')) || nodeType === 'bigint') {
-      const toJSON = node.toJSON;
-      if (typeof toJSON === 'function') node = toJSON.call(node, key);
-    }
-
-    return replacer.call(parent, parent, key, node);
-  }
-
   // indent 为本节点缩进串（根节点由 space 决定）。传缩进串而非层级：indent(level + 1)
   // 恒等于 indent(level) + space，于是每节点只需一次 O(1) 拼接。compact 模式下 space 为空串，
   // 拼接恒得空串，无需分支。
   function stringify(parent: any, key: string, node: any, indent: string): string | undefined {
-    node = resolveReplacement(parent, key, node);
+    node = resolveReplacement(replacer, parent, key, node);
     if (node === undefined) return;
 
     // 第二相：只有「非 null 对象」需要装箱判定——数组必非装箱对象（跳过以免为数组多付一次原型读取），
