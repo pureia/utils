@@ -437,12 +437,75 @@ describe('stableStringify', () => {
     });
 
     it('tag getter 抛错的对象按普通对象序列化（原生不读该属性，故不抛错）', () => {
+      let reads = 0;
       class TagThrower {
-        get [Symbol.toStringTag]() { throw new Error('tag getter boom'); }
+        get [Symbol.toStringTag]() { reads++; throw new Error('tag getter boom'); }
       }
       const value = { a: new TagThrower() };
       expect(stableStringify(value)).toBe('{"a":{}}');
       expect(stableStringify(value)).toBe(JSON.stringify(value));
+      // 原生根本不读该属性，本实现同样一次都不读（读取会触发 getter：抛错或有副作用）
+      expect(reads).toBe(0);
+    });
+
+    it('包装对象带伪造的 Symbol.toStringTag 时仍按内部槽拆箱', () => {
+      const num: any = new Number(3);
+      Object.defineProperty(num, Symbol.toStringTag, { value: 'Foo' });
+      expect(stableStringify(num)).toBe('3');
+      expect(stableStringify(num)).toBe(JSON.stringify(num));
+
+      // 标签伪造成另一类包装：仍按真实内部槽取值
+      const str: any = new String('ab');
+      Object.defineProperty(str, Symbol.toStringTag, { value: 'Number' });
+      expect(stableStringify(str)).toBe(JSON.stringify(str));
+    });
+
+    it('包装对象带抛错的 Symbol.toStringTag getter 时仍按内部槽拆箱，且该 getter 从未被触发', () => {
+      let reads = 0;
+      const num: any = new Number(3);
+      Object.defineProperty(num, Symbol.toStringTag, {
+        get() { reads++; throw new Error('tag getter boom'); },
+      });
+      expect(stableStringify(num)).toBe('3');
+      expect(stableStringify(num)).toBe(JSON.stringify(num));
+      expect(reads).toBe(0);
+    });
+
+    it('自带 Symbol.toStringTag 的包装子类同样按内部槽拆箱', () => {
+      class Tagged extends Number {
+        get [Symbol.toStringTag]() { return 'Tagged'; }
+      }
+      const value = { a: new Tagged(4) };
+      expect(stableStringify(value)).toBe('{"a":4}');
+      expect(stableStringify(value)).toBe(JSON.stringify(value));
+    });
+
+    it('链上有包装原型但无对应内部槽的对象不被拆箱', () => {
+      const fake: any = Object.create(Number.prototype);
+      fake.a = 1;
+      Object.defineProperty(fake, Symbol.toStringTag, { value: 'Foo' });
+      expect(stableStringify(fake)).toBe('{"a":1}');
+      expect(stableStringify(fake)).toBe(JSON.stringify(fake));
+    });
+
+    it('原型被换成另一类包装原型时仍按真实内部槽取值', () => {
+      // 链上是 Number.prototype、内部槽却是 [[BooleanData]]：命中的 Number 槽探测失败后兜底探测
+      // 其余三类，命中真实槽——与原生同值
+      const bool: any = new Boolean(false);
+      Object.setPrototypeOf(bool, Number.prototype);
+      Object.defineProperty(bool, Symbol.toStringTag, { value: 'Foo' });
+      expect(stableStringify(bool)).toBe('false');
+      expect(stableStringify(bool)).toBe(JSON.stringify(bool));
+
+      // 内部槽是 [[StringData]] 时取值走 ToString，而它会调用现在的 Number.prototype.toString——
+      // 与原生同样抛 TypeError（取值不被槽检查的 catch 吞掉）
+      const str: any = new String('ab');
+      Object.setPrototypeOf(str, Number.prototype);
+      expect(() => stableStringify(str)).toThrow(TypeError);
+
+      const fresh: any = new String('ab');
+      Object.setPrototypeOf(fresh, Number.prototype);
+      expect(() => JSON.stringify(fresh)).toThrow(TypeError);
     });
 
     it('包装对象取值抛错时异常向调用方传播（不被槽检查的 catch 吞掉）', () => {

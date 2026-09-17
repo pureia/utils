@@ -59,6 +59,13 @@ interface ResolvedOptions {
 /** 恒等 replacer：未提供 replacer 时的默认值（模块级常量，免去每次调用重新分配） */
 const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
 
+/**
+ * 品牌判定原语：在模块加载时捕获——`Object` 与 `Object.prototype` 上的方法可被调用方改写，
+ * 捕获后判定不受其影响（与下方槽检查方法同理）
+ */
+const getPrototype = Object.getPrototypeOf;
+const objectToString = Object.prototype.toString;
+
 /** Number 包装的槽检查：`Number.prototype.valueOf` 要求具备 [[NumberData]]，无槽即抛 TypeError */
 const boxedNumberSlot = (node: object): unknown => Number.prototype.valueOf.call(node);
 
@@ -91,55 +98,159 @@ interface BoxedKind {
   value?: (node: object) => unknown;
 }
 
+const NUMBER_KIND: BoxedKind = { slot: boxedNumberSlot, value: boxedNumberValue };
+const STRING_KIND: BoxedKind = { slot: boxedStringSlot, value: boxedStringValue };
+const BOOLEAN_KIND: BoxedKind = { slot: boxedBooleanSlot };
+const BIGINT_KIND: BoxedKind = { slot: boxedBigIntSlot };
+
+/**
+ * 标签 → 槽种类：只在链上不存在 `Symbol.toStringTag` 时用于挑候选——此时 `Object.prototype.toString`
+ * 的标签必然取自内部槽（规范：无该属性则回落到 builtinTag），既不可伪造，读取也不会触发用户代码。
+ */
 const BOXED_KINDS: Record<string, BoxedKind> = {
-  '[object Number]': { slot: boxedNumberSlot, value: boxedNumberValue },
-  '[object String]': { slot: boxedStringSlot, value: boxedStringValue },
-  '[object Boolean]': { slot: boxedBooleanSlot },
-  '[object BigInt]': { slot: boxedBigIntSlot },
+  '[object Number]': NUMBER_KIND,
+  '[object String]': STRING_KIND,
+  '[object Boolean]': BOOLEAN_KIND,
+  '[object BigInt]': BIGINT_KIND,
 };
+
+/** 包装原型 → 槽种类：链上存在 `Symbol.toStringTag` 时改由原型链挑候选（四类内部槽只能随对应包装原型进入原型链） */
+const BOXED_BY_PROTO = new Map<object, BoxedKind>([
+  [Number.prototype, NUMBER_KIND],
+  [String.prototype, STRING_KIND],
+  [Boolean.prototype, BOOLEAN_KIND],
+  [BigInt.prototype, BIGINT_KIND],
+]);
+
+/** 四类槽种类的固定探测顺序：与 BOXED_BY_PROTO 同源，避免两处清单漂移 */
+const BOXED_KIND_LIST: readonly BoxedKind[] = [...BOXED_BY_PROTO.values()];
+
+/** 无对应内部槽的哨兵：四类槽的取值恒为原始值（Number/String 经 ToNumber/ToString、Boolean/BigInt 读槽），不可能等于它 */
+const NO_SLOT = Symbol('noSlot');
+
+/**
+ * 读取槽值：无对应内部槽时返回 `NO_SLOT`。
+ *
+ * **取值（`kind.value`）刻意留在 try 之外**：包装对象被改写的 `valueOf` / `toString` 抛错应向
+ * 调用方传播（与原生一致），不能被这里的 catch 吞掉而误判为「非装箱对象」。
+ *
+ * @param kind - 候选槽种类
+ * @param node - 待取值的对象（调用方保证非 null）
+ * @returns 拆箱后的原始值，或 `NO_SLOT`
+ */
+function readSlotValue(kind: BoxedKind, node: object): unknown {
+  let slotValue: unknown;
+  try {
+    slotValue = kind.slot(node);
+  }
+  catch {
+    return NO_SLOT;
+  }
+
+  return kind.value ? kind.value(node) : slotValue;
+}
+
+/**
+ * 沿原型链挑候选槽种类：返回链上第一个包装原型对应的种类，链上没有包装原型则返回 undefined。
+ *
+ * 只用于「标签不可读」的场合。原型只是**线索**而非判定——链上有包装原型不等于真有对应内部槽
+ * （如 `Object.create(Number.prototype)`），故调用方仍须做槽检查。
+ *
+ * 走到 `Object.prototype` 即可停：它与其后的 `null` 都不可能是包装原型，而任何包装原型都必在
+ * 链上更早出现（省去「类实例 / `Map` 等负例」的最后一跳）。
+ *
+ * @param node - 待判定的对象（调用方保证非 null）
+ * @returns 候选槽种类，或 undefined
+ */
+function kindByProtoChain(node: object): BoxedKind | undefined {
+  let proto = getPrototype(node);
+  while (proto !== null && proto !== Object.prototype) {
+    const kind = BOXED_BY_PROTO.get(proto);
+    if (kind) return kind;
+    proto = getPrototype(proto);
+  }
+  return undefined;
+}
+
+/**
+ * 链上带 `Symbol.toStringTag` 时的拆箱：不读该属性，改由原型链与内部槽判定。
+ *
+ * 先试原型链命中的那一类（常态一次命中）；原型被改写成另一类包装原型时，实际内部槽才是事实，
+ * 故再兜底探测其余三类——槽检查不可伪造，误判方向只可能是「漏探测」而非「误拆箱」。
+ *
+ * @param node - 待判定的对象（调用方保证非 null）
+ * @returns 拆箱后的原始值，或原对象
+ */
+function unboxByProtoChain(node: object): unknown {
+  const hinted = kindByProtoChain(node);
+  if (!hinted) return node;
+
+  const hit = readSlotValue(hinted, node);
+  if (hit !== NO_SLOT) return hit;
+
+  for (let i = 0; i < BOXED_KIND_LIST.length; i++) {
+    const kind = BOXED_KIND_LIST[i];
+    if (kind === hinted) continue;
+    const value = readSlotValue(kind, node);
+    if (value !== NO_SLOT) return value;
+  }
+  return node;
+}
 
 /**
  * 拆箱装箱原始值；非装箱对象原样返回。
  *
- * 标签只用于**挑选候选**：`Object.prototype.toString` 会先读 `Symbol.toStringTag`，而该属性可被
- * 伪造（原生只认内部槽）。因此选中候选后必须再用真正的槽检查确认——对应原型方法在缺少内部槽时
- * 抛 `TypeError`，这是 userland 唯一不可伪造的品牌检查。用 `Object.prototype.toString` 而非
- * `instanceof`，则是因为后者跨 realm 失效。
+ * 判定分三步——**原型直取**、**挑候选**、**确认槽**：
+ * - 原型即四个包装原型之一：直接做该类的槽检查（槽才是事实，标签给不出别的结论），命中即返回；
+ * - 链上不存在 `Symbol.toStringTag`：`Object.prototype.toString` 的标签必然取自内部槽（规范：
+ *   无该属性则回落到 builtinTag），不可伪造，可直接用作候选；此路径不触发任何用户代码。
+ * - 链上存在 `Symbol.toStringTag`：**一律不读该属性**——它可能是伪造的值，也可能是抛错或有副作用
+ *   的 getter，而原生根本不读它（读一次即多一次可观察行为）；改由原型链定位候选（见 `unboxByProtoChain`）。
  *
- * **标签读取与槽检查同处一个 try**：`Symbol.toStringTag` 的 getter 自身可能抛错，而原生根本不读
- * 该属性，故这一阶段的抛错一律按「非装箱对象」处理（否则一个抛错的 tag getter 会让本函数抛给
- * 调用方，而原生能正常序列化）。**取值（`kind.value`）刻意留在 try 之外**：包装对象被改写的
- * `valueOf`/`toString` 抛错时应向调用方传播（与原生一致），不能被这里的 catch 吞掉。
+ * 候选到此只是「可能」，一律再用真正的槽检查确认——对应原型方法在缺少内部槽时抛 `TypeError`，
+ * 这是 userland 唯一不可伪造的品牌检查。用内部槽而非 `instanceof`，因为后者跨 realm 失效，
+ * 且可被 `Symbol.hasInstance` 改写。
  *
  * 先做一次廉价原型筛选：原型为 `Object.prototype` / `Array.prototype` / `null` 者按常规对象
  * 处理、直接返回——普通对象图与数组因而只多一次原型读取。
  *
- * 已知边界：原型被人为重置为 `Object.prototype` 的包装对象会被上述筛选跳过（原生仍会拆箱），
- * 此时退回为「按普通对象序列化」，即本次修复前的行为。
+ * 已知边界（userland 只能按原型与标签推断，原生按内部槽判定；以下三类与原生不一致）：
+ * - 原型被重置为 `Object.prototype` / `Array.prototype` / `null` 的包装对象被上述筛选跳过。原生仍会
+ *   拆箱，但取值沿重置后原型上的 `valueOf` / `toString`（重置为 `Object.prototype` 时两者都取不到
+ *   原始值，最终得 `null`）；
+ * - 原型被换成**链上不含四个包装原型之一**（跨 realm 的包装原型不在其列）**、且带
+ *   `Symbol.toStringTag`** 的包装对象：标签不可读、原型链也无线索，只能按普通对象序列化；
+ * - **BigInt 包装**没有内置标签——`Object.prototype.toString` 的 builtinTag 不含 `[[BigIntData]]`，
+ *   它的 `[object BigInt]` 来自 `BigInt.prototype[Symbol.toStringTag]`——故原型一旦被换出
+ *   `BigInt.prototype`，即使链上无标签也无从识别，只能按普通对象序列化（原生抛 `TypeError`）。
+ *   Number / String / Boolean 包装不受此限：三者都有内置标签。
+ * 另有一处与原生不同的可观察行为：`Symbol.toStringTag in node` 会让 Proxy 收到一次 `has` 陷阱
+ * 调用（原生不调用该陷阱）；陷阱抛错时异常向调用方传播。
  *
  * @param node - 待判定的对象（调用方保证非 null）
  * @returns 拆箱后的原始值，或原对象
  */
 function unbox(node: object): unknown {
-  const proto = Object.getPrototypeOf(node);
+  const proto = getPrototype(node);
   if (proto === Object.prototype || proto === Array.prototype || proto === null) return node;
 
-  let kind: BoxedKind | undefined;
-  let slotValue: unknown;
-  try {
-    // 标签读取与槽检查同处一个 try：tag getter 抛错与「无内部槽」都按非装箱对象处理
-    kind = BOXED_KINDS[Object.prototype.toString.call(node)];
-    if (kind) slotValue = kind.slot(node);
-  }
-  catch {
-    // tag getter 抛错，或对象没有对应内部槽（槽检查抛 TypeError）——两种情况都按普通对象处理
-    return node;
+  // 原型即某个包装原型：槽检查直接给答案，标签给不出别的结论（槽才是事实）。这也是装箱对象最常见的
+  // 形态（含子类以外的全部同 realm 包装对象），故优先于标签判定，省掉一次标签读取
+  const byProto = BOXED_BY_PROTO.get(proto);
+  if (byProto) {
+    const value = readSlotValue(byProto, node);
+    if (value !== NO_SLOT) return value;
+    // 原型被改写成另一类包装原型：内部槽与原型不符，落到下面的通用判定
   }
 
-  if (!kind) return node;
+  // 链上无标签：Object.prototype.toString 的标签必出自内部槽（规范：无该属性则回落到 builtinTag），
+  // 不可伪造，可直接用作候选；此路径不触发任何用户代码
+  if (!(Symbol.toStringTag in node)) {
+    const kind = BOXED_KINDS[objectToString.call(node)];
+    return kind ? readSlotValue(kind, node) : node;
+  }
 
-  // 取值留在 try 之外：包装对象改写的 valueOf/toString 抛错应向调用方传播（与原生一致）
-  return kind.value ? kind.value(node) : slotValue;
+  return unboxByProtoChain(node);
 }
 
 /**
