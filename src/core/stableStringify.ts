@@ -59,27 +59,50 @@ interface ResolvedOptions {
 /** 恒等 replacer：未提供 replacer 时的默认值（模块级常量，免去每次调用重新分配） */
 const identityReplacer: ReplacerFunc = (_parent, _key, value) => value;
 
-/** Number / String / Boolean 包装对象的内部槽值即其 `valueOf()` 结果 */
-const unwrapBoxedValue = (node: object): unknown => (node as { valueOf: () => unknown }).valueOf();
+/** Number 包装取值：按规范用 `ToNumber`（沿可覆写的 valueOf → toString 求值） */
+const boxedNumberValue = (node: object): unknown => Number(node);
+
+/** String 包装取值：按规范用 `ToString`（沿可覆写的 toString → valueOf 求值） */
+const boxedStringValue = (node: object): unknown => String(node);
+
+/** Boolean 包装：按规范直接读内部槽（原型方法要求具备该槽，无槽即抛 TypeError） */
+const boxedBooleanSlot = (node: object): unknown => Boolean.prototype.valueOf.call(node);
+
+/** BigInt 包装：按规范直接读内部槽；BigInt 无对应全局构造器，只能经 BigInt.prototype 取值 */
+const boxedBigIntSlot = (node: object): unknown => BigInt.prototype.valueOf.call(node);
+
+/** Number 包装的槽检查：`Number.prototype.valueOf` 要求具备 [[NumberData]]，无槽即抛 TypeError */
+const assertNumberSlot = (node: object): unknown => Number.prototype.valueOf.call(node);
+
+/** String 包装的槽检查：`String.prototype.valueOf` 要求具备 [[StringData]]，无槽即抛 TypeError */
+const assertStringSlot = (node: object): unknown => String.prototype.valueOf.call(node);
 
 /**
- * 装箱原始值标签 → 拆箱函数（原生在 replacer 之后按内部槽拆箱，故此处同样按内部槽还原）。
+ * 装箱原始值标签 → { 槽检查, 取值 }。
  *
- * 标签经 `Object.prototype.toString` 取得而非 `instanceof`：后者跨 realm 失效，而内部槽判定与
- * realm 无关。BigInt 包装没有对应的全局构造器，只能经 `BigInt.prototype.valueOf` 取其内部槽。
+ * 取值按原生规范分两类：Number 用 `ToNumber`、String 用 `ToString`——二者都会沿可覆写的
+ * `valueOf`/`toString` 求值；Boolean 与 BigInt 才是直接读内部槽。故四类不能统一用 `valueOf`。
  */
-const BOXED_UNWRAPPERS: Record<string, (node: object) => unknown> = {
-  '[object Number]': unwrapBoxedValue,
-  '[object String]': unwrapBoxedValue,
-  '[object Boolean]': unwrapBoxedValue,
-  '[object BigInt]': node => BigInt.prototype.valueOf.call(node),
+const BOXED_KINDS: Record<string, { slot: (node: object) => unknown; value: (node: object) => unknown }> = {
+  '[object Number]': { slot: assertNumberSlot, value: boxedNumberValue },
+  '[object String]': { slot: assertStringSlot, value: boxedStringValue },
+  '[object Boolean]': { slot: boxedBooleanSlot, value: boxedBooleanSlot },
+  '[object BigInt]': { slot: boxedBigIntSlot, value: boxedBigIntSlot },
 };
 
 /**
- * 按内部槽拆箱装箱原始值；非装箱对象原样返回。
+ * 拆箱装箱原始值；非装箱对象原样返回。
  *
- * 先做一次廉价原型筛选：原型为 `Object.prototype` / `Array.prototype` / `null` 者必非装箱对象，
- * 直接返回——普通对象图因而只多一次原型读取；仅可疑原型才做一次精确标签判定。
+ * 标签只用于**挑选候选**：`Object.prototype.toString` 会先读 `Symbol.toStringTag`，而该属性可被
+ * 伪造（原生只认内部槽）。因此选中候选后必须再用真正的槽检查确认——对应原型方法在缺少内部槽时
+ * 抛 `TypeError`，这是 userland 唯一不可伪造的品牌检查。用 `Object.prototype.toString` 而非
+ * `instanceof`，则是因为后者跨 realm 失效。
+ *
+ * 先做一次廉价原型筛选：原型为 `Object.prototype` / `Array.prototype` / `null` 者按常规对象
+ * 处理、直接返回——普通对象图与数组因而只多一次原型读取。
+ *
+ * 已知边界：原型被人为重置为 `Object.prototype` 的包装对象会被上述筛选跳过（原生仍会拆箱），
+ * 此时退回为「按普通对象序列化」，即本次修复前的行为。
  *
  * @param node - 待判定的对象（调用方保证非 null）
  * @returns 拆箱后的原始值，或原对象
@@ -88,8 +111,18 @@ function unbox(node: object): unknown {
   const proto = Object.getPrototypeOf(node);
   if (proto === Object.prototype || proto === Array.prototype || proto === null) return node;
 
-  const unwrap = BOXED_UNWRAPPERS[Object.prototype.toString.call(node)];
-  return unwrap ? unwrap(node) : node;
+  const kind = BOXED_KINDS[Object.prototype.toString.call(node)];
+  if (!kind) return node;
+
+  try {
+    kind.slot(node);
+  }
+  catch {
+    // 无对应内部槽 —— 标签来自伪造的 Symbol.toStringTag，按普通对象处理
+    return node;
+  }
+
+  return kind.value(node);
 }
 
 /**

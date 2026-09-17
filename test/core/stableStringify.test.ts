@@ -431,6 +431,35 @@ describe('stableStringify', () => {
       expect(stableStringify({ a: 1 }, { space: new String('\t') as any })).toBe(JSON.stringify({ a: 1 }, null, new String('\t') as any));
     });
 
+    it('覆写 valueOf / toString 的包装对象按规范取值（Number 用 ToNumber、String 用 ToString、Boolean 读槽）', () => {
+      // 规范：Number 走 ToNumber、String 走 ToString（两者都会沿可覆写的 valueOf/toString 求值），
+      // Boolean 与 BigInt 才直接读内部槽——故四类不能统一用 valueOf
+      const bool: any = new Boolean(false);
+      bool.valueOf = () => true;
+      expect(stableStringify(bool)).toBe(JSON.stringify(bool));
+
+      const str: any = new String('ab');
+      str.toString = () => 'zz';
+      expect(stableStringify(str)).toBe(JSON.stringify(str));
+
+      const num: any = new Number(3);
+      num.valueOf = () => ({});
+      expect(stableStringify(num)).toBe(JSON.stringify(num));
+
+      const num2: any = new Number(3);
+      num2.valueOf = 5;
+      expect(stableStringify(num2)).toBe(JSON.stringify(num2));
+    });
+
+    it('伪造的 Symbol.toStringTag 标签不会被误拆箱（须经内部槽品牌检查确认）', () => {
+      class Fake {
+        get [Symbol.toStringTag]() { return 'Number'; }
+        valueOf() { return 5; }
+      }
+      const value = { a: new Fake() };
+      expect(stableStringify(value)).toBe(JSON.stringify(value));
+    });
+
     it('space 传装箱 Boolean 或其他对象时不缩进（原生仅拆箱 Number / String）', () => {
       expect(stableStringify({ a: 1 }, { space: new Boolean(true) as any })).toBe('{"a":1}');
       expect(stableStringify({ a: 1 }, { space: new Boolean(true) as any })).toBe(JSON.stringify({ a: 1 }, null, new Boolean(true) as any));
