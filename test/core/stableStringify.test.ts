@@ -814,5 +814,69 @@ describe('stableStringify', () => {
     }
   });
 
+  /**
+   * JSDoc 自陈、此前无用例覆盖的两处边界——重构期间的护栏。
+   *
+   * 两处都**与原生不一致**，所以这里钉的不是「与原生相同」，而是「本实现与原生各自确定的现状」：
+   * 重构若把这两处边界挪走，会在这里变红（挪走属于行为变更，需要单独排期，不能夹带在重构里）。
+   */
+  describe('已知边界：原型重置与 Proxy has 陷阱', () => {
+    it('原型被重置为 Object.prototype / Array.prototype / null 的包装对象按普通对象序列化', () => {
+      const resetTo = <T extends object>(value: T, proto: object | null): T => {
+        Object.setPrototypeOf(value, proto);
+        return value;
+      };
+
+      // 重置为 Object.prototype / Array.prototype：本实现按普通对象序列化（无自有可枚举属性故为 {}）；
+      // 原生仍按内部槽拆箱，再沿重置后的原型链求 ToNumber / ToString
+      expect(stableStringify(resetTo(new Number(5), Object.prototype))).toBe('{}');
+      expect(JSON.stringify(resetTo(new Number(5), Object.prototype))).toBe('null');
+      expect(stableStringify(resetTo(new Number(5), Array.prototype))).toBe('{}');
+      expect(JSON.stringify(resetTo(new Number(5), Array.prototype))).toBe('0');
+
+      // String 包装的自有索引属性可枚举，故普通对象序列化会带上它们
+      expect(stableStringify(resetTo(new String('ab'), Object.prototype))).toBe('{"0":"a","1":"b"}');
+      expect(JSON.stringify(resetTo(new String('ab'), Object.prototype))).toBe('"[object String]"');
+
+      // 重置为 null：本实现仍是普通对象；原生取不到 valueOf / toString，直接抛 TypeError
+      expect(stableStringify(resetTo(new Number(5), null))).toBe('{}');
+      expect(() => JSON.stringify(resetTo(new Number(5), null))).toThrow(TypeError);
+
+      // 自有可枚举属性照常输出，嵌套位置同样
+      const withOwn = () => resetTo(Object.assign(new Number(5), { a: 1 }), null);
+      expect(stableStringify(withOwn())).toBe('{"a":1}');
+      expect(stableStringify({ n: withOwn() })).toBe('{"n":{"a":1}}');
+    });
+
+    it('链上带 Symbol.toStringTag 时 Proxy 会收到一次 has 陷阱（原生不调用该陷阱）', () => {
+      // 原型不是 Object.prototype / Array.prototype / null，故 unbox 会执行到 `Symbol.toStringTag in node`。
+      // 输出两边一致（Proxy 没有内部槽，都不拆箱），差别只在陷阱调用次数
+      let mineHasCalls = 0;
+      let nativeHasCalls = 0;
+      const boxedProxy = (onHas: () => void) => new Proxy(new Number(5), {
+        has: (target, key) => {
+          onHas();
+          return Reflect.has(target, key);
+        },
+      });
+
+      expect(stableStringify(boxedProxy(() => { mineHasCalls++; }))).toBe('{}');
+      expect(JSON.stringify(boxedProxy(() => { nativeHasCalls++; }))).toBe('{}');
+      expect(mineHasCalls).toBe(1);
+      expect(nativeHasCalls).toBe(0);
+    });
+
+    it('该 has 陷阱抛错时异常向调用方传播（原生不调用该陷阱，故照常序列化）', () => {
+      const throwing = () => new Proxy(new Number(5), {
+        has: () => {
+          throw new Error('has boom');
+        },
+      });
+
+      expect(() => stableStringify(throwing())).toThrow('has boom');
+      expect(JSON.stringify(throwing())).toBe('{}');
+    });
+  });
+
   /* eslint-enable no-new-wrappers, unicorn/new-for-builtins */
 });
