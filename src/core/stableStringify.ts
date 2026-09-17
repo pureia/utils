@@ -21,7 +21,7 @@
  * THE SOFTWARE.
  */
 
-/** 自定义 key 排序比较函数：接收 `{ key, value }` 对（第三个可选参数为按 key 取值函数），返回负数/0/正数决定排序 */
+/** 自定义 key 排序比较函数：接收 `{ key, value }` 对；第三个参数恒被传入按 key 取值的 getter（类型上仍标为可选，以便两参比较器直接赋值），返回负数/0/正数决定排序 */
 type CmpFunc = (
   a: { key: string; value: any },
   b: { key: string; value: any },
@@ -41,7 +41,7 @@ interface StableStringifyOptions {
   cmp?: CmpFunc;
   /** 过滤/转换函数，返回 `undefined` 跳过该属性 */
   replacer?: ReplacerFunc;
-  /** 将循环引用序列化为 `"__cycle__"` 而非抛错，默认 false */
+  /** 将循环引用序列化为 `"__cycle__"` 而非抛错；严格判定（`=== true`），其余取值含真值（`1`/`'yes'` 等）一律视为 false，默认 false */
   cycles?: boolean;
 }
 
@@ -178,15 +178,13 @@ function resolveOptions(opts: StableStringifyOptions | CmpFunc | undefined): Res
   // 比较器使用，并在 sort 内部抛 "cmpOpt is not a function"——且只有存在 ≥2 个键的节点才会走到
   // 排序，故表现为「多数输入正常、偶发抛错」这种难以归因的形态。
   const cmpOpt = typeof opts === 'function' ? opts : (isObj && typeof opts.cmp === 'function' ? opts.cmp : void 0);
-  // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）；
-  // 仅当调用方 cmp 声明了第三个参数（按 key 取值函数）时才注入 getter，
-  // 与原始 json-stable-stringify 的调用约定保持一致。
-  // 「是否注入 getter」只取决于调用方函数形态、单次调用内恒定，故在此判定一次而非每个节点重算。
-  const withGetter = cmpOpt ? cmpOpt.length > 2 : false;
+  // 包装为按节点调用的比较器：每次比较都向 cmp 传入 { key, value } 对（取自当前节点）与按 key 取值的
+  // getter。**getter 无条件注入**——原先按 `Function.length > 2` 嗅探调用方是否声明了第三个参数，
+  // 而第三参带默认值或 rest 时 length 停在 2，这类比较器会静默拿不到 getter 导致排序走偏；
+  // 两参比较器只是多收一个被忽略的实参。getter 每节点构造一次并复用（而非每次比较新建）。
   const cmp: NodeComparator | undefined = cmpOpt
     ? (node: Record<string, any>) => {
-        // getter 每节点构造一次并复用：原先在比较器内部按需新建，等于每次比较都分配一个对象
-        const getter = withGetter ? { get: (k: string) => node[k] } : void 0;
+        const getter = { get: (k: string) => node[k] };
         return (a: string, b: string) =>
           cmpOpt(
             { key: a, value: node[a] },

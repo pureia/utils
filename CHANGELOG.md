@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `stableStringify`：三参 `cmp` 的 getter 由「按 `Function.length > 2` 嗅探」改为**无条件注入**——第三参带默认值或 rest 的比较器此前 `length` 为 2，静默拿不到 getter 导致排序走偏（实测 `(a, b, getter = null)` 输出 `{"b":1,"a":2}`，应为 `{"a":2,"b":1}`）；两参比较器仅多收一个被忽略的实参，输出不变。`CmpFunc` 的第三参类型仍标为可选，以便两参比较器直接赋值
 - `stableStringify`：三参 `cmp` 收到的 getter 对象由「每次比较新建」改为「每节点复用同一对象」（去掉每次比较的一次对象分配）；仅对以 `===` 比较该参数的程序可观察，返回值与调用约定不变
 - `stableStringify`：内部结构重构，**语义等价、输出逐字节不变**——选项归一化（重载判别、`space` 归一、`cmp` 包装）提炼为独立的 Split Phase 函数 `resolveOptions`；缩进由「传层级 + 缓存 `space.repeat(level)`」改为「直接传缩进串」（依据恒等式 `indent(level + 1) ≡ indent(level) + space`），缩进缓存随之失去存在理由而移除；容器包裹提炼为模块级纯函数 `wrap` 并直接收括号字面量（不再按 `'[]' | '{}'` 标签二次解码）；循环引用防护的 `seen.add`/`seen.delete` 由两个容器分支各写一遍收敛为单点（不使用 `try/finally`：抛错中止整个调用，`seen` 为调用级状态）。重构期间以 33 组逐字节特性测试作为「行为未变」的可执行护栏；该表在差分对照确认后撤除，其中 6 条有增量的行转为独立用例（见 Docs）。验证：差分对照重构前实现 24187 次比对 → 0 处不一致；微基准同进程交替测量取中位数——深嵌套 depth=200 持平（-0.6%，区间重叠）、宽对象 5000 键 -6.1%、大数组 10000 项 -4.8%
 
@@ -65,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 
+- `stableStringify`：`cycles` 选项写明「严格判定 `=== true`，其余取值含真值一律视为 false」
 - 测试：`stableStringify` 撤除重构期使用的逐字节特性测试表（33 行，其中约 27 行与既有独立用例重复——而既有用例本就使用精确字符串断言，逐字节钉住早已覆盖），保留 6 条真正有增量的行并按其归属转为独立用例；测试标题「UTF-16 码点序」修正为「码元序」
 - `stableStringify`：文件注释与 CONTEXT.md「稳定序列化」词条中的键排序措辞由「UTF-16 码点」修正为「UTF-16 码元」（`Array.prototype.sort` 默认比较码元，两者仅在星号代理对等场景有别）
 - README：新增「请求去重的语义边界」（去重键 = 拦截器前全量配置序列化、等待者不执行拦截器链）、「失败类别速查表」、ESM-only 说明；修正 `lint:fix` 脚本说明

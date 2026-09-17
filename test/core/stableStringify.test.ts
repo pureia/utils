@@ -134,6 +134,15 @@ describe('stableStringify', () => {
       expect(result).toBe('{"c":3,"b":2,"a":1}');
     });
 
+    it('第三参带默认值的比较器同样收到 getter（不再按 Function.length 嗅探）', () => {
+      // (a, b, getter = null) 的 length 为 2；若按 length > 2 嗅探，这类比较器会静默拿不到 getter、
+      // 排序走偏。getter 现无条件注入，故不依赖声明的形参个数
+      const withDefault = (a: any, b: any, getter: any = null) =>
+        (getter ? getter.get(b.key) - getter.get(a.key) : 0);
+      expect(stableStringify({ b: 1, a: 2 }, { cmp: withDefault })).toBe('{"a":2,"b":1}');
+      expect(stableStringify({ b: 1, a: 2 }, withDefault)).toBe('{"a":2,"b":1}');
+    });
+
     it('嵌套对象中每一层使用相同的 cmp', () => {
       const obj = { b: { z: 6, y: 5 }, a: 3 };
       const result = stableStringify(obj, (a, b) => b.value - a.value);
@@ -186,6 +195,15 @@ describe('stableStringify', () => {
       const result = stableStringify(obj, { cycles: true });
       // 排序后 a 在前，self 在后
       expect(result).toBe('{"a":1,"self":"__cycle__"}');
+    });
+
+    it('cycles 严格判定为 === true，其余取值一律视为 false', () => {
+      const make = () => { const o: Record<string, any> = { a: 1 }; o.self = o; return o; };
+      expect(stableStringify(make(), { cycles: true })).toBe('{"a":1,"self":"__cycle__"}');
+      // 非 true 的真值与其他类型：一律按未启用处理，故遇到循环引用仍抛 TypeError
+      expect(() => stableStringify(make(), { cycles: 1 as any })).toThrow(TypeError);
+      expect(() => stableStringify(make(), { cycles: 'yes' as any })).toThrow(TypeError);
+      expect(() => stableStringify(make(), { cycles: 1n as any })).toThrow(TypeError);
     });
 
     it('嵌套循环引用应正确处理', () => {
