@@ -182,18 +182,11 @@ function unboxByProtoChain(node: object, start: object | null, probed?: BoxedKin
  * 先做一次廉价原型筛选：原型为 `Object.prototype` / `Array.prototype` / `null` 者按常规对象
  * 处理、直接返回——普通对象图与数组因而只多一次原型读取。
  *
- * 已知边界（userland 只能按原型与标签推断，原生按内部槽判定；以下三类与原生不一致）：
- * - 原型被重置为 `Object.prototype` / `Array.prototype` / `null` 的包装对象被上述筛选跳过。原生仍会
- *   拆箱，但取值沿重置后原型上的 `valueOf` / `toString`（重置为 `Object.prototype` 时两者都取不到
- *   原始值，最终得 `null`）；
- * - 原型被换成**链上不含四个包装原型之一**（跨 realm 的包装原型不在其列）**、且带
- *   `Symbol.toStringTag`** 的包装对象：标签不可读、原型链也无线索，只能按普通对象序列化；
- * - **BigInt 包装**没有内置标签——`Object.prototype.toString` 的 builtinTag 不含 `[[BigIntData]]`，
- *   它的 `[object BigInt]` 来自 `BigInt.prototype[Symbol.toStringTag]`——故原型一旦被换出
- *   `BigInt.prototype`，即使链上无标签也无从识别，只能按普通对象序列化（原生抛 `TypeError`）。
- *   Number / String / Boolean 包装不受此限：三者都有内置标签。
- * 另有一处与原生不同的可观察行为：`Symbol.toStringTag in node` 会让 Proxy 收到一次 `has` 陷阱
- * 调用（原生不调用该陷阱）；陷阱抛错时异常向调用方传播。
+ * 与原生不一致的边界（三处拆箱差异、两处 Proxy 陷阱计数差异）见 CONTEXT.md「稳定序列化与原生
+ * `JSON.stringify` 的差异」词条。这里只记**为什么**：userland 只能按原型与标签推断，原生按内部槽
+ * 判定，故凡「链上无线索可循」的形态都只能按普通对象序列化。BigInt 包装尤其无从识别——它的
+ * `[object BigInt]` 来自 `BigInt.prototype[Symbol.toStringTag]` 而不是内置标签，故原型一旦被换出
+ * `BigInt.prototype`，链上又无标签时便没有可用线索（Number / String / Boolean 有内置标签，不受此限）。
  *
  * @param node - 待判定的对象（调用方保证非 null）
  * @returns 拆箱后的原始值，或原对象
@@ -383,6 +376,12 @@ function circularMessage(path: Set<object>, keys: string[], repeated: object, pa
  * - `cycles: true` 时将循环引用序列化为 `"__cycle__"` 而非抛错
  * - 类数组整数键（如 `"2"`/`"10"`）不按数值优先排序（原生会将其排在最前），
  *   与其余键统一按码元序排序——确定性不受影响，但跨工具哈希比对时需注意
+ *
+ * 加固边界：只有装箱判定与取值在模块加载时捕获内置原语，其余路径（键枚举、容器判定、叶子与键编码、
+ * `space` 归一化）都走调用时可达的全局与原型——改写 `Object.keys` / `Array.isArray` /
+ * `JSON.stringify` 等仍会改变输出，而原生 `JSON.stringify` 对同类改写免疫。
+ *
+ * 完整契约（含加固范围与全部与原生不一致之处）见仓库 `CONTEXT.md` 的「稳定序列化」相关词条。
  *
  * 重载：第二参数要么是选项对象，要么是自定义比较函数，二者互斥（运行时按 typeof 判别）。
  *
