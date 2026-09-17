@@ -183,38 +183,43 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
     // 子节点缩进 = 本层缩进 + 一级缩进；同一值同时用作成员的缩进前缀
     const childIndent = indent + space;
 
+    // 环保护的进入-离开必须成对：进入点与离开点各只有一处，新增容器分支也不会遗漏配对的
+    // seen.delete（原先两个分支各自 add/delete 一遍）。不使用 try/finally：抛错会中止整个调用，
+    // 而 seen 是调用级状态，故无需在异常路径上回滚。
+    seen.add(node);
+
+    let result: string;
+
     if (Array.isArray(node)) {
-      seen.add(node);
       const out: string[] = [];
       for (let i = 0; i < node.length; i++) {
         // key 恒为字符串（对齐原生 JSON.stringify）：数组元素传索引字符串，而非数字
         const item = stringify(node, String(i), node[i], childIndent);
         out.push(childIndent + (item === undefined ? 'null' : item));
       }
-      seen.delete(node);
-      return wrap(out, '[', ']', indent);
+      result = wrap(out, '[', ']', indent);
     }
+    else {
+      const keys = Object.keys(node);
+      const comparer = cmp ? cmp(node) : void 0;
+      comparer ? keys.sort(comparer) : keys.sort();
 
-    seen.add(node);
+      const out: string[] = [];
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const value = stringify(node, key, node[key], childIndent);
 
-    const keys = Object.keys(node);
-    const comparer = cmp ? cmp(node) : void 0;
-    comparer ? keys.sort(comparer) : keys.sort();
+        if (value === undefined) continue;
 
-    const out: string[] = [];
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      const value = stringify(node, key, node[key], childIndent);
+        const keyValue = JSON.stringify(key) + colonSeparator + value;
+        out.push(childIndent + keyValue);
+      }
 
-      if (value === undefined) continue;
-
-      const keyValue = JSON.stringify(key) + colonSeparator + value;
-      out.push(childIndent + keyValue);
+      result = wrap(out, '{', '}', indent);
     }
 
     seen.delete(node);
-
-    return wrap(out, '{', '}', indent);
+    return result;
   }
 
   // 根节点缩进：pretty-print 下首行换行，compact 下为空串（等价于原 level = 0 的缩进串）
