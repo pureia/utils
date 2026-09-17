@@ -498,4 +498,36 @@ describe('stableStringify', () => {
       expect(stableStringify({ a: fn })).toBe(JSON.stringify({ a: fn }));
     });
   });
+
+  describe('数组长度在遍历前快照（对齐原生 JSON.stringify）', () => {
+    it('replacer 追加元素不改变本次输出', () => {
+      const native = [1, 2];
+      expect(JSON.stringify(native, function (this: any, key: string, value: any) { if (key === '0') native.push(3); return value; })).toBe('[1,2]');
+
+      const mine = [1, 2];
+      expect(stableStringify(mine, {
+        replacer: (_parent, key, value) => { if (key === '0') mine.push(3); return value; },
+      })).toBe('[1,2]');
+    });
+
+    it('replacer 截断数组时仍按原长度产出（被截断处补 null）', () => {
+      const native = [1, 2, 3];
+      expect(JSON.stringify(native, function (this: any, key: string, value: any) { if (key === '0') this.length = 1; return value; })).toBe('[1,null,null]');
+
+      const mine = [1, 2, 3];
+      expect(stableStringify(mine, {
+        replacer: (parent, key, value) => { if (key === '0') parent.length = 1; return value; },
+      })).toBe('[1,null,null]');
+    });
+
+    it('replacer 拉长数组时不产出新增下标', () => {
+      const native = [1, 2];
+      expect(JSON.stringify(native, function (this: any, key: string, value: any) { if (key === '0') this[5] = 9; return value; })).toBe('[1,2]');
+
+      const mine = [1, 2];
+      expect(stableStringify(mine, {
+        replacer: (parent, key, value) => { if (key === '0') parent[5] = 9; return value; },
+      })).toBe('[1,2]');
+    });
+  });
 });

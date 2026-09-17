@@ -240,8 +240,11 @@ function stableStringify(obj: any, opts?: StableStringifyOptions | CmpFunc): str
     let result: string;
 
     if (Array.isArray(node)) {
+      // 长度在循环前快照一次（对齐原生的 LengthOfArrayLike）：遍历期间对数组的读写不再改变迭代次数。
+      // 同时把每轮的 length 属性读取降为一次
+      const length = node.length;
       const out: string[] = [];
-      for (let i = 0; i < node.length; i++) {
+      for (let i = 0; i < length; i++) {
         // key 恒为字符串（对齐原生 JSON.stringify）：数组元素传索引字符串，而非数字
         const item = stringify(node, String(i), node[i], childIndent);
         out.push(childIndent + (item === undefined ? 'null' : item));
